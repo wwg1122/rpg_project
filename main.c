@@ -1,9 +1,13 @@
 #include <SDL2/SDL.h>		//SDL2 헤더 파일
+#include <stdlib.h>
+#include <time.h>
 #include <stdio.h>
+
 
 #define KEY e.key.keysym.sym	//75줄
 #define SET_COLOR(r,g,b) SDL_SetRenderDrawColor(renderer, r, g, b, 255)
 #define FILL_RECT(rect) SDL_RenderFillRect(renderer, &rect)
+#define GET_RAND(min, max) (rand() % (max - min + 1 ) + min) 	//랜덤 난수 범위 구현
 
 //난이도 설정 전역 변수
 char *diff_names[] = {"Easy", "Medium", "Hard"};
@@ -42,6 +46,7 @@ int main(int argc, char *argv[])
 	int current_skill_count = 0;
 	int battle_menu_count = sizeof(battle_menu) / sizeof(battle_menu[0]);
 	int item_menu_count = sizeof(item_menu) / sizeof(item_menu[0]);
+	srand(time(NULL));
 
 	int difficulty = 0;
 	int hp_potions = 2;
@@ -207,9 +212,35 @@ int main(int argc, char *argv[])
 						switch (menu_index)
 						{
 							case 0:
-								printf("일반 공격! %d 데미지!\n", player.atk);
-								monster.hp -= player.atk;
+							{
+								int final_dmg = GET_RAND(player.atk -5, player.atk + 5);
+								monster.hp -= final_dmg;
+								printf("\n일반 공격! %s에게  %d의  데미지!\n",monster.name, final_dmg);
+								
+								if (monster.hp <= 0)
+								{
+									monster.hp = 0;
+									printf("%s를 처치 했습니다! 전투 승리!\n", monster.name);
+									game_state = 7;
+								}
+								else
+								{	
+									// 반격 로직인데 큐 사용시 지우거나 변경 예정
+									int m_dmg = GET_RAND(monster.atk - 2, monster.atk + 2);
+									player.hp -= m_dmg;
+									printf("%s의 반격 %d의 피해!\n", monster.name, m_dmg);
+
+									if (player.hp <= 0)
+									{
+										player.hp = 0;
+										printf("전투에서 패배했습니다...\n");
+										game_state = 7;
+									}
+								}
 								break;
+							}
+
+
 							case 1:
 								game_state = 4; // 스킬 창 열기!
 								menu_index = 0;
@@ -313,6 +344,14 @@ int main(int argc, char *argv[])
 						if(menu_index == 0)game_state = 0; 	//메인화면
 						else game_state =2;			//난이도 선택
 					}		
+				}
+				else if (game_state == 7)
+				{
+					if (KEY == SDLK_RETURN)
+					{
+						game_state = 0;
+						menu_index = 0;
+					}
 				}
 			}	
 		}
@@ -428,6 +467,19 @@ int main(int argc, char *argv[])
 				FILL_RECT(opt);
 			}
 		}
+		else if (game_state == 7)
+		{
+			if (monster.hp <= 0) SET_COLOR(0, 0, 100);
+			else SET_COLOR(100, 0, 0);
+
+			SDL_Rect full_screen = {0, 0, 800, 600};
+			FILL_RECT(full_screen);
+
+			SET_COLOR(255, 255, 255);
+			SDL_Rect result_box = {200, 200, 400, 200};
+			FILL_RECT(result_box);
+		}
+
 
 
 
