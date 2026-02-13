@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <time.h>
 #include <stdio.h>
+#include "monster.h"
+#include "map.h"
 
 
 #define KEY e.key.keysym.sym	//75줄
@@ -20,24 +22,9 @@ char *item_menu[] = {"HP Potion", "MP Potion"};
 
 char **current_skills; 					 	//더블 포인터로 직업 스킬 연결
 
-//캐릭터 구조체 생성 ( 수치 수정 가능 ) 
-typedef struct
-{
-	int hp;
-	int max_hp;
-	int mp;
-	int max_mp;
-	int atk;
-} Character;
+int saved_map_x = 0;						//전투 후 복귀를 위한 좌표
+int saved_map_y = 0;
 
-//몬스터 구조체 생성
-typedef struct
-{
-	int hp;
-	int max_hp;
-	int atk;
-	char *name;
-}Enemy;
 
 int main(int argc, char *argv[])
 {	
@@ -85,17 +72,20 @@ int main(int argc, char *argv[])
 	//사용자 정의 변수
 	int menu_index = 0;	//**아마 0,1 로 게임 시작과 종료를 해둘 예정
 	int game_state = 0;
+	int is_boss =  0;
 
 	//시스템 이벤트 루프 명령어
 	int quit = 0;
 	SDL_Event e;
 	
 	//사용자 정의 데이터(캐릭터)
-	Character warrior = {150, 150, 30, 30, 20};	//체력,최대체력,마나,최대마나,공격력
-	Character mage = {80, 80, 120, 120, 10};
+	Character warrior = {150, 150, 30, 30, 20, 0, 0};	//체력,최대체력,마나,최대마나,공격력
+	Character mage = {80, 80, 120, 120, 10, 0, 0};
 	Character player;				//실제 플레이어 데이터 설정
 	
-	Enemy monster = {100, 100, 15, "Slime"};	//임시 몬스터 개체값
+	//Enemy monster = {100, 100, 15, "Slime"};	//임시 몬스터 개체값
+	Enemy *current_monster = NULL; 			//동적할당으로 변경(2026-02-13)
+	
 
 	//게임 종료 이벤트 결정 코드
 	while(!quit)
@@ -190,13 +180,85 @@ int main(int argc, char *argv[])
 						player.mp = player.max_mp;
 						hp_potions = 2;
 						mp_potions = 2;
-						monster.hp = monster.max_hp;
-
-						game_state = 3;
+						
+						init_map(difficulty, &player);
+						game_state = 99;
 						menu_index = 0;
 
 					}
 				}
+
+				else if (game_state == 99)
+				{
+					int nx = player.x;
+					int ny = player.y;
+
+					if (KEY == SDLK_UP){ ny--;}
+					else if (KEY == SDLK_DOWN) { ny++; }
+    					else if (KEY == SDLK_LEFT) { nx--; }
+    					else if (KEY == SDLK_RIGHT) { nx++; }
+					
+					//맵 이탈 체크 로직
+					if (nx >= 0 && nx < g_map_width && ny >= 0 && ny < g_map_height)
+					{
+						//벽인경우 이동 불가 로직
+						if (g_dungeon_map[ny][nx] != 0)
+						{
+							player.x = nx;
+							player.y = ny;
+							reveal_fog(player.x, player.y);
+						}
+						//몬스터 조우시 로직
+						if (g_dungeon_map[ny][nx] == 2 || g_dungeon_map[ny][nx] == 3)
+						{
+							saved_map_x = nx;
+							saved_map_y = ny;
+							is_boss = (g_dungeon_map[ny][nx] == 3);
+
+							if (difficulty == 0) // [하] 슬라임의 숲
+							{
+								if (is_boss)
+									current_monster = create_enemy("King Slime", 300, 25);
+								else
+									current_monster = (GET_RAND(0, 1) == 0) ? \
+											  create_enemy("Slime", 60, 10) : \
+								       			  create_enemy("Imp", 50, 12);
+							}
+							else if (difficulty == 1) // [중] 고블린의 동굴
+							{
+								if (is_boss)
+									current_monster = create_enemy("Goblin Chieftain", 600, 45);
+								else
+								{
+									int r = GET_RAND(0, 2);
+									if (r == 0)      current_monster = \
+									create_enemy("Goblin Mage", 120, 20);
+								
+									else if (r == 1) current_monster = \
+									create_enemy("Goblin Warrior", 150, 15);
+
+									else             current_monster = \
+									create_enemy("Cave Bat", 40, 25);
+								}
+							}
+							else // [상] 골렘의 사원
+							{
+								if (is_boss)
+									current_monster = create_enemy("Ancient Watcher", 1200, 70);
+								else
+									current_monster = (GET_RAND(0, 1) == 0) ? \
+											  create_enemy("Stone Golem", 250, 30) : \
+											  create_enemy("Mini Golem", 180, 40);
+							}
+
+							game_state = 3;
+							menu_index = 0;
+						}
+					}
+				}
+
+
+
 				else if (game_state == 3)
 				{
 					if (KEY == SDLK_UP)
@@ -214,21 +276,38 @@ int main(int argc, char *argv[])
 							case 0:
 							{
 								int final_dmg = GET_RAND(player.atk -5, player.atk + 5);
-								monster.hp -= final_dmg;
-								printf("\n일반 공격! %s에게  %d의  데미지!\n",monster.name, final_dmg);
+								current_monster->hp -= final_dmg;
+								printf("\n일반 공격! %s에게  %d의  데미지!\n",current_monster->name, \
+									       	final_dmg);
 								
-								if (monster.hp <= 0)
+								if (current_monster->hp <= 0)
 								{
-									monster.hp = 0;
-									printf("%s를 처치 했습니다! 전투 승리!\n", monster.name);
-									game_state = 7;
+									current_monster->hp = 0;
+									printf("%s를 처치 했습니다! 전투 승리!\n",current_monster->name);
+									
+									g_dungeon_map[saved_map_y][saved_map_x] = 1;
+
+									free_enemy(current_monster);
+									current_monster = NULL;
+
+									if (is_boss)
+									{
+										game_state = 7;
+									}
+									else
+									{
+										game_state = 99;
+									}
+
+
 								}
 								else
 								{	
 									// 반격 로직인데 큐 사용시 지우거나 변경 예정
-									int m_dmg = GET_RAND(monster.atk - 2, monster.atk + 2);
+									int m_dmg = GET_RAND(current_monster -> atk -2, \
+										       	current_monster->atk +2);
 									player.hp -= m_dmg;
-									printf("%s의 반격 %d의 피해!\n", monster.name, m_dmg);
+									printf("%s의 반격 %d의 피해!\n", current_monster->name, m_dmg);
 
 									if (player.hp <= 0)
 									{
@@ -422,6 +501,57 @@ int main(int argc, char *argv[])
 				FILL_RECT(bar);
 			}
 		}
+
+		else if (game_state == 99)
+		{
+			int tile_size = 60;
+
+			for (int y = 0; y < 5; y++)
+			{
+				for (int x = 0; x < 5; x++)
+				{
+					int mx = player.x -2 + x;
+					int my = player.y -2 + y;
+
+					SDL_Rect tile_rect = { 250 + (x * tile_size), 150 + (y * tile_size),
+						tile_size - 2, tile_size - 2 };
+
+					if (mx >= 0 && mx < g_map_width && my >= 0 && my < g_map_height)
+					{
+						if (g_fog_map[my][mx] == 1)
+						{
+							int type = g_dungeon_map[my][mx];
+
+							if (mx == player.x && my == player.y)
+								SET_COLOR(255, 255, 0);
+							else if (type == 0)
+								SET_COLOR(50, 50, 50);
+							else if (type == 1)
+								SET_COLOR(200, 200, 200);
+							else if (type == 2)
+								SET_COLOR(255, 0, 0);
+							else if (type == 3)
+								SET_COLOR(150, 0, 255);
+						}
+						else
+						{
+							SET_COLOR(20, 20, 20);
+						}
+					}
+					else
+					{
+						SET_COLOR(0, 0, 0);
+					}
+
+					FILL_RECT(tile_rect);
+				}
+			}
+
+			SDL_Rect ui_bar = {0, 500, 800, 100};
+			SET_COLOR(40, 40, 40);
+			FILL_RECT(ui_bar);
+		}
+
 		else if(game_state == 3)
 		{
 			SET_COLOR(30, 10, 10);
@@ -467,17 +597,20 @@ int main(int argc, char *argv[])
 				FILL_RECT(opt);
 			}
 		}
+		
 		else if (game_state == 7)
 		{
-			if (monster.hp <= 0) SET_COLOR(0, 0, 100);
-			else SET_COLOR(100, 0, 0);
+			SDL_Rect full_bg = {0, 0, 800, 600};
 
-			SDL_Rect full_screen = {0, 0, 800, 600};
-			FILL_RECT(full_screen);
+			if (player.hp <= 0)
+				SET_COLOR(100, 0, 0);
+			else
+				SET_COLOR(0, 50, 100);
+			FILL_RECT(full_bg);
 
+			SDL_Rect res_box = {200, 200, 400, 200};
 			SET_COLOR(255, 255, 255);
-			SDL_Rect result_box = {200, 200, 400, 200};
-			FILL_RECT(result_box);
+			FILL_RECT(res_box);
 		}
 
 
