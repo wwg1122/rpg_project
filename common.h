@@ -3,7 +3,8 @@
 
 #include <SDL2/SDL.h>
 #include <stdlib.h>
-
+#include <SDL2/SDL_ttf.h>
+#include <SDL2/SDL_image.h>
 //키 매크로 정리
 #define KEY e.key.keysym.sym
 #define SET_COLOR(r,g,b) SDL_SetRenderDrawColor(renderer, r, g, b, 255)
@@ -25,25 +26,33 @@
 #define STATE_GAME_OVER 7 // 결과
 
 
-//구조체 모음
 typedef struct
-{
-	int hp;
-	int max_hp;
-	int mp;
-	int max_mp;
-	int atk;
-	int x, y;
-} Character;
-
-typedef struct Enemy
 {
     int hp;
     int max_hp;
+    int mp;
+    int max_mp;
     int atk;
-    char *name;
-    struct Enemy *next; 
-} Enemy;
+    int is_defending;
+
+    /* 논리적 맵 좌표 */
+    int x;
+    int y;
+
+    /* 스무스 무브먼트용 픽셀 좌표 */
+    int pixel_x;
+    int pixel_y;
+    int is_moving;
+
+    /* 애니메이션 및 방향 */
+    int dir;
+    int anim_frame;
+    int anim_timer;
+} Character;
+
+extern TTF_Font* g_font;
+extern SDL_Texture* g_p_img;
+extern SDL_Texture* g_e_img;
 
 #endif
 

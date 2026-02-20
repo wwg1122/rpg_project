@@ -1,0 +1,1270 @@
+--- common.h ---
+#ifndef COMMON_H
+#define COMMON_H
+
+#include <SDL2/SDL.h>
+#include <stdlib.h>
+
+//키 매크로 정리
+#define KEY e.key.keysym.sym
+#define SET_COLOR(r,g,b) SDL_SetRenderDrawColor(renderer, r, g, b, 255)
+#define FILL_RECT(rect) SDL_RenderFillRect(renderer, &rect)
+#define GET_RAND(min, max) (rand() % (max - min + 1 ) + min)
+
+//맵 타일 종류 정의
+#define TILE_WALL 0
+#define TILE_PATH 1
+#define TILE_MONSTER 2
+#define TILE_BOSS 3
+
+// 게임 상태 정의
+#define STATE_MAIN_MENU 0
+#define STATE_SELECT_JOB 1
+#define STATE_SELECT_DIFF 2
+#define STATE_MAP 99      // 던전 탐험
+#define STATE_BATTLE 3    // 전투
+#define STATE_GAME_OVER 7 // 결과
+
+
+//구조체 모음
+typedef struct
+{
+	int hp;
+	int max_hp;
+	int mp;
+	int max_mp;
+	int atk;
+	int x, y;
+} Character;
+/*
+typedef struct Enemy
+{
+    int hp;
+    int max_hp;
+    int atk;
+    char *name;
+    struct Enemy *next; 
+} Enemy;
+*/
+#endif
+
+--- main.c ---
+#include <SDL2/SDL.h>		//SDL2 헤더 파일
+#include <stdlib.h>
+#include <time.h>
+#include <stdio.h>
+#include "monster.h"
+#include "map.h"
+
+
+#define KEY e.key.keysym.sym	//75줄
+#define SET_COLOR(r,g,b) SDL_SetRenderDrawColor(renderer, r, g, b, 255)
+#define FILL_RECT(rect) SDL_RenderFillRect(renderer, &rect)
+#define GET_RAND(min, max) (rand() % (max - min + 1 ) + min) 	//랜덤 난수 범위 구현
+
+//난이도 설정 전역 변수
+char *diff_names[] = {"Easy", "Medium", "Hard"};
+//전투 시 사용 가능한 메뉴 나열
+char *battle_menu[] = {"Attack", "Skill", "Item", "Defense", "Run"};
+//
+char *warrior_skills[] = {"Power Strike", "Whirlwind"};		//휠이 아닌 훨윈드이다.
+char *mage_skills[] = 	{"Magic Arrow", "Meteor"};		
+char *item_menu[] = {"HP Potion", "MP Potion"};
+
+char **current_skills; 					 	//더블 포인터로 직업 스킬 연결
+
+int saved_map_x = 0;						//전투 후 복귀를 위한 좌표
+int saved_map_y = 0;
+
+
+int main(int argc, char *argv[])
+{	
+	//배열 크기 변수 설정
+	int diff_count = sizeof(diff_names) / sizeof(diff_names[0]);
+	int current_skill_count = 0;
+	int battle_menu_count = sizeof(battle_menu) / sizeof(battle_menu[0]);
+	int item_menu_count = sizeof(item_menu) / sizeof(item_menu[0]);
+	srand(time(NULL));
+
+	int difficulty = 0;
+	int hp_potions = 2;
+	int mp_potions = 2;
+	int current_floor = 1;
+	int max_floor = 3;	
+
+	//시스템 초기화 후 부팅 확인 여부 판단
+	if (SDL_Init(SDL_INIT_VIDEO) < 0){				//시스템 에러 확인
+		printf("초기화 실패 에러내용: %s\n", SDL_GetError());	//에러 이유 출력
+		return 1;
+	}
+
+	//윈도우 창 생성 설정	
+	SDL_Window *window = SDL_CreateWindow(
+			"RPG Project",			//창 제목
+			SDL_WINDOWPOS_CENTERED,		//창 가로 크기
+			SDL_WINDOWPOS_CENTERED,		//창 세로 크기
+			800, 600,			
+			SDL_WINDOW_SHOWN 		
+	);
+	
+	//윈도우 창 생성 성공 여부 관련 코드
+	if (window == NULL)
+	{
+		printf("윈도우 생성 실패 에러내용: %s\n",SDL_GetError());
+		SDL_Quit();
+		return 1;
+	}
+
+	//시스템 렌더 생성
+	//SDL_RENDERER_ACCELERATED
+	SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+	//투명도 사용을 위한 코드 설정
+	SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+
+	//사용자 정의 변수
+	int menu_index = 0;	//**아마 0,1 로 게임 시작과 종료를 해둘 예정
+	int game_state = 0;
+	int is_boss =  0;
+
+	//시스템 이벤트 루프 명령어
+	int quit = 0;
+	SDL_Event e;
+	
+	//사용자 정의 데이터(캐릭터)
+	Character warrior = {150, 150, 30, 30, 20, 0, 0};	//체력,최대체력,마나,최대마나,공격력
+	Character mage = {80, 80, 120, 120, 10, 0, 0};
+	Character player;				//실제 플레이어 데이터 설정
+	
+	//Enemy monster = {100, 100, 15, "Slime"};	//임시 몬스터 개체값
+	Enemy *current_monster = NULL; 			//동적할당으로 변경(2026-02-13)
+	
+
+	//게임 종료 이벤트 결정 코드
+	while(!quit)
+	{
+		while (SDL_PollEvent(&e) != 0)
+		{
+			if (e.type == SDL_QUIT)
+			{
+				quit = 1;
+			}
+			
+			
+
+			//main_index = 0 게임시작 -> game_state = 1로 이동
+			//main_index = 1 게임종료 -> quit = 1 로 이동 후 종료
+
+			else if (e.type == SDL_KEYDOWN)
+			{
+				if (KEY == SDLK_ESCAPE)
+				{
+					game_state = 0;
+					menu_index = 0;
+				}
+				if (game_state == 0)
+                		{
+                    			if (KEY == SDLK_UP)
+                    			{
+                        			menu_index = 0;
+                   			}
+                    			else if (KEY == SDLK_DOWN)
+                    			{		
+                        			menu_index = 1;
+                    			}
+                    			else if (KEY == SDLK_RETURN)
+                    			{
+                        			if (menu_index == 0)
+                        			{
+                            				game_state = 1;
+                            				menu_index = 0; 
+                        			}
+                        			else
+                        			{
+                            				quit = 1;
+                        			}
+                    			}
+                		}
+				else if (game_state == 1)
+				{
+					if (KEY == SDLK_LEFT)
+					{
+						menu_index = 0;
+					}
+					else if (KEY == SDLK_RIGHT)
+					{
+						menu_index = 1;
+					}
+					else if (KEY == SDLK_RETURN)
+					{
+						if (menu_index == 0)
+						{
+							player = warrior;
+							current_skills = warrior_skills;
+							current_skill_count = sizeof(warrior_skills) / sizeof(warrior_skills[0]);
+						}
+						else
+						{
+							player = mage;
+							current_skills = mage_skills;
+							current_skill_count = sizeof(mage_skills) / sizeof(mage_skills[0]);
+						}
+
+						game_state = 2;
+						menu_index = 0;
+					}	
+				}
+				else if (game_state == 2)
+				{
+					if (KEY == SDLK_UP)
+					{
+						if(menu_index > 0) menu_index--;
+					}
+					else if (KEY == SDLK_DOWN)
+					{
+						if(menu_index < diff_count -1) menu_index++;
+					}
+					else if (KEY == SDLK_RETURN)
+					{
+						difficulty = menu_index;
+						
+						//나가거나 다시 입장 할 때 체력 초기화 및 포션 보충 로직
+						player.hp = player.max_hp;
+						player.mp = player.max_mp;
+						hp_potions = 2;
+						mp_potions = 2;
+						
+						current_floor = 1;
+                        			init_map(difficulty, current_floor, max_floor, &player);
+
+						game_state = 99;
+						menu_index = 0;
+
+					}
+				}
+									
+				else if (game_state == 99)
+                			{
+                    				int nx = player.x;
+                   				int ny = player.y;
+
+                    				if (KEY == SDLK_UP) { ny--; }
+                    				else if (KEY == SDLK_DOWN) { ny++; }
+                    				else if (KEY == SDLK_LEFT) { nx--; }
+                    				else if (KEY == SDLK_RIGHT) { nx++; }
+
+                    				if (nx != player.x || ny != player.y)
+                    				{
+                        				update_all_monsters_ai(player.x, player.y);
+                    				}	
+                    
+                    				// 맵 이탈 체크 로직 (매크로 상수 사용)
+                    				if (nx >= 0 && nx < MAP_WIDTH && ny >= 0 && ny < MAP_HEIGHT)
+                    				{
+                        				// 벽(0)이 아닌 경우 이동 처리
+                        				if (g_dungeon_map[ny][nx] != TILE_WALL)
+                        				{
+                            					player.x = nx;
+                            					player.y = ny;
+                        				}
+							
+							if (g_dungeon_map[ny][nx] == TILE_STAIRS)
+							{
+								current_floor++;
+								init_map(difficulty, current_floor, max_floor, &player);
+								printf("\n==================================\n");
+								printf("[시스템] %d층으로 진입했습니다!\n", current_floor);
+								printf("==================================\n\n");
+								continue;
+							}
+
+                        				// 몬스터 조우시 로직
+                        				if (g_dungeon_map[ny][nx] == TILE_MONSTER || g_dungeon_map[ny][nx] == TILE_BOSS)
+                        				{
+                            					saved_map_x = nx;
+                            					saved_map_y = ny;
+                            					is_boss = (g_dungeon_map[ny][nx] == TILE_BOSS);
+
+                            					// [변경] create_enemy 대신 g_monsters 배열에서 해당 좌표의 몬스터를 찾음
+                            					for (int i = 0; i < g_monster_count; i++)
+                            					{
+                                					if (g_monsters[i].is_alive && g_monsters[i].x == nx && g_monsters[i].y == ny)
+                                					{
+                                    						current_monster = &g_monsters[i];
+                                    						break;
+                                					}
+                            					}
+
+                            					if (current_monster != NULL)
+                            					{	
+									if (current_monster -> ignore_turns > 0)
+									{
+
+									}
+									else
+									{
+                                					game_state = 3;
+                                					menu_index = 0;
+                            						}
+                        					}		
+                    					}
+                				}
+					
+
+				/*
+				else if (game_state == 99)
+				{
+					int nx = player.x;
+					int ny = player.y;
+
+					if (KEY == SDLK_UP){ ny--;}
+					else if (KEY == SDLK_DOWN) { ny++; }
+    					else if (KEY == SDLK_LEFT) { nx--; }
+    					else if (KEY == SDLK_RIGHT) { nx++; }
+					
+					//맵 이탈 체크 로직
+					if (nx >= 0 && nx < g_map_width && ny >= 0 && ny < g_map_height)
+					{
+						//벽인경우 이동 불가 로직
+						if (g_dungeon_map[ny][nx] != 0)
+						{
+							player.x = nx;
+							player.y = ny;
+							reveal_fog(player.x, player.y);
+						}
+						//몬스터 조우시 로직
+						if (g_dungeon_map[ny][nx] == 2 || g_dungeon_map[ny][nx] == 3)
+						{
+							saved_map_x = nx;
+							saved_map_y = ny;
+							is_boss = (g_dungeon_map[ny][nx] == 3);
+
+							if (difficulty == 0) // [하] 슬라임의 숲
+							{
+								if (is_boss)
+									current_monster = create_enemy("King Slime", 300, 25);
+								else
+									current_monster = (GET_RAND(0, 1) == 0) ? \
+											  create_enemy("Slime", 60, 10) : \
+								       			  create_enemy("Imp", 50, 12);
+							}
+							else if (difficulty == 1) // [중] 고블린의 동굴
+							{
+								if (is_boss)
+									current_monster = create_enemy("Goblin Chieftain", 600, 45);
+								else
+								{
+									int r = GET_RAND(0, 2);
+									if (r == 0)      current_monster = \
+									create_enemy("Goblin Mage", 120, 20);
+								
+									else if (r == 1) current_monster = \
+									create_enemy("Goblin Warrior", 150, 15);
+
+									else             current_monster = \
+									create_enemy("Cave Bat", 40, 25);
+								}
+							}
+							else // [상] 골렘의 사원
+							{
+								if (is_boss)
+									current_monster = create_enemy("Ancient Watcher", 1200, 70);
+								else
+									current_monster = (GET_RAND(0, 1) == 0) ? \
+											  create_enemy("Stone Golem", 250, 30) : \
+											  create_enemy("Mini Golem", 180, 40);
+							}
+
+							game_state = 3;
+							menu_index = 0;
+						}
+					}
+				}
+				*/
+				
+
+				else if (game_state == 3)
+				{
+					if (KEY == SDLK_UP)
+					{
+						if(menu_index > 0) menu_index--;
+					}
+					else if (KEY == SDLK_DOWN)
+					{
+						if(menu_index < battle_menu_count - 1) menu_index++;
+					}
+					else if (KEY == SDLK_RETURN)
+					{
+						switch (menu_index)
+						{
+							case 0:
+							{
+								int final_dmg = GET_RAND(player.atk -5, player.atk + 5);
+								current_monster->hp -= final_dmg;
+								printf("\n일반 공격! %s에게  %d의  데미지!\n",current_monster->name, \
+									       	final_dmg);
+								
+								if (current_monster->hp <= 0)
+								{
+									current_monster->hp = 0;
+									printf("%s를 처치 했습니다! 전투 승리!\n",current_monster->name);
+									
+									g_dungeon_map[saved_map_y][saved_map_x] = TILE_PATH;
+
+									//free_enemy(current_monster);
+									current_monster->is_alive = 0;
+									current_monster = NULL;
+
+									if (is_boss)
+									{
+										game_state = 7;
+									}
+									else
+									{
+										game_state = 99;
+									}
+
+
+								}
+								else
+								{	
+									// 반격 로직인데 큐 사용시 지우거나 변경 예정
+									int m_dmg = GET_RAND(current_monster -> atk -2, \
+										       	current_monster->atk +2);
+									player.hp -= m_dmg;
+									printf("%s의 반격 %d의 피해!\n", current_monster->name, m_dmg);
+
+									if (player.hp <= 0)
+									{
+										player.hp = 0;
+										printf("전투에서 패배했습니다...\n");
+										game_state = 7;
+									}
+								}
+								break;
+							}
+
+
+							case 1:
+								game_state = 4; // 스킬 창 열기!
+								menu_index = 0;
+								break;
+							case 2:
+								game_state = 5; // 아이템 창 열기!
+								menu_index = 0;
+								break;
+							case 3:
+								printf("방어 태세! 몬스터의 공격을 대비한다\n");
+								break;
+							case 4:
+								game_state = 6; // 도망 확인창으로 이동
+								menu_index = 0;
+								break;
+						}
+					}
+				}
+				//스킬 창 로직
+				else if (game_state == 4) 
+				{
+					if (KEY == SDLK_UP)
+					{
+						if(menu_index > 0) menu_index--;
+					}
+					else if (KEY == SDLK_DOWN)
+					{
+						if(menu_index < current_skill_count - 1) menu_index++;
+					}
+					else if (KEY == SDLK_RETURN)
+					{
+						// 직업에 맞는 스킬 출력
+						printf("%s 발동!\n", current_skills[menu_index]);
+
+						// 단일/광역 데미지 로직 들어갈 공간
+
+						game_state = 3; // 스킬 쓰고 메인 전투 메뉴로 다시 돌아가기
+						menu_index = 0;
+					}
+					else if (KEY == SDLK_ESCAPE)
+					{
+						game_state = 3;
+						menu_index = 1; // ESC 누르면 스킬 커서로 돌아가기
+					}
+				}
+				else if (game_state == 5) // 아이템 창 로직
+				{
+					if (KEY == SDLK_UP)
+					{
+						if(menu_index > 0) menu_index--;
+					}
+					else if (KEY == SDLK_DOWN)
+					{
+						if(menu_index < item_menu_count - 1) menu_index++;
+					}
+					else if (KEY == SDLK_RETURN)
+					{
+						if (menu_index == 0)
+						{
+							if (hp_potions > 0)
+							{
+								printf("HP 포션 사용! (남은 개수: %d)\n", --hp_potions);
+							}
+							else
+							{
+								printf("보유하신 HP 포션이 없습니다.\n");
+							}
+						}
+						else if (menu_index == 1)
+						{
+							if(mp_potions >0)
+							{
+								printf("MP 포션 사용! (남은 개수: %d)\n", --mp_potions);
+							}
+							else
+							{
+								printf("보유하신 MP 포션이 없습니다.\n");
+							}
+						}
+						game_state = 3;
+						menu_index = 0;
+					}
+					else if (KEY == SDLK_ESCAPE)
+					{
+						game_state = 3;
+						menu_index = 2; // ESC 누르면 아이템 커서로 돌아가기
+					}
+				}
+
+				else if (game_state == 6)
+                		{
+                    			if (KEY == SDLK_UP) { if(menu_index > 0) menu_index--; }
+                    			else if (KEY == SDLK_DOWN) { if(menu_index < 1) menu_index++; }
+                    			else if (KEY == SDLK_RETURN)
+                    			{
+                        			if(menu_index == 0) 
+                        			{
+                            				printf("무사히 도망쳤다!\n");
+                            				current_monster->ignore_turns = 5; // 5턴 동안 전투 안 걸림!
+                            				current_monster = NULL;
+                            				game_state = 99; // 던전으로 복귀
+                        			} 
+                        			else 
+                        			{
+                            				game_state = 3; // 도망 취소, 전투 화면으로 복귀
+                        			}
+                        			menu_index = 0;
+                    			}       
+                		}
+
+				/*
+				else if (game_state == 6)
+				{
+					if (KEY == SDLK_UP)
+					{
+						if(menu_index > 0) menu_index--;
+					}
+					else if (KEY == SDLK_DOWN)
+					{
+						if(menu_index < 1)menu_index++;
+					}
+					else if (KEY == SDLK_RETURN)
+					{
+						if(menu_index == 0)game_state = 0; 	//메인화면
+						else game_state =2;			//난이도 선택
+					}	
+					*/	
+				}
+				else if (game_state == 7)
+				{
+					if (KEY == SDLK_RETURN)
+					{
+						game_state = 0;
+						menu_index = 0;
+					}
+				}
+			}	
+		}
+		SET_COLOR(0,0,0);    
+		SDL_RenderClear(renderer);			
+		
+		if (game_state == 0)
+		{
+			//시작 메뉴 바 위치 설정
+			SDL_Rect start_bar = {250, 320, 300, 50};
+			SDL_Rect quit_bar = {250, 390, 300, 50};
+				
+			//시작 버튼 그리기
+			if (menu_index == 0) SET_COLOR(255, 255, 0);
+			else SET_COLOR(100, 100, 100);
+			FILL_RECT(start_bar);
+
+			if (menu_index == 1) SET_COLOR(255, 255, 0);
+			else SET_COLOR(100, 100, 100);
+			FILL_RECT(quit_bar);
+		}
+		else if(game_state == 1)
+		{
+			SET_COLOR(0, 0, 100);
+			SDL_Rect full_screen = {0, 0, 800, 600};
+			FILL_RECT(full_screen);
+
+			SDL_Rect left_screen  = {0, 0, 400, 600};
+			SDL_Rect right_screen = {400, 0, 400, 600};
+		
+			// 왼쪽 선택 중 (전사)	
+			if (menu_index == 0)
+			{
+				SET_COLOR(0, 0, 100);
+				FILL_RECT(left_screen);
+
+
+				SDL_SetRenderDrawColor(renderer, 255, 255, 0, 150);
+				SDL_Rect warrior_img = {100, 150, 200, 250};
+				FILL_RECT(warrior_img);
+			}
+
+			// 오른쪽 선택 중 (마법사)
+			else
+			{
+				SET_COLOR(0, 0, 100);
+				FILL_RECT(right_screen);
+			
+				SDL_SetRenderDrawColor(renderer, 0, 255, 255, 150);
+				SDL_Rect mage_img = {500, 150, 200, 250};
+				FILL_RECT(mage_img);
+			}
+
+
+		}
+		else if(game_state == 2)
+		{
+			SET_COLOR(20, 20, 40);
+			SDL_Rect full_screen = {0, 0, 800, 600};
+			FILL_RECT(full_screen);
+
+			for(int i = 0; i < diff_count; i++)
+			{
+				SDL_Rect bar = {250, 150 + (i * 120), 300, 70};
+				if (menu_index == i) SET_COLOR(255, 255, 0);
+				else SET_COLOR(150, 150, 150);
+
+				FILL_RECT(bar);
+			}
+		}
+
+		else if (game_state == 99)
+        	{
+            		// [변경] 화면에 11x11 칸을 렌더링하기 위해 타일 크기를 줄임 (40px)
+            		int tile_size = 40;
+            		int camera_w = 11;
+            		int camera_h = 11;
+            
+            		// UI를 제외한 게임 화면을 중앙에 배치하기 위한 오프셋 (여백)
+            		int offset_x = (800 - (camera_w * tile_size)) / 2;
+            		int offset_y = 30; 
+
+            		for (int cy = 0; cy < camera_h; cy++)
+            		{
+                		for (int cx = 0; cx < camera_w; cx++)
+               	 		{
+                    			// 카메라 중심을 플레이어 좌표로 계산
+                    			int map_x = player.x - (camera_w / 2) + cx;
+                    			int map_y = player.y - (camera_h / 2) + cy;
+
+                    			SDL_Rect tile_rect = { offset_x + (cx * tile_size), offset_y + (cy * tile_size),
+                                           			tile_size - 1, tile_size - 1 }; // -1로 타일 간격(격자) 표현
+
+                    			// 맵 범위 내부인지 확인
+                    			if (map_x >= 0 && map_x < MAP_WIDTH && map_y >= 0 && map_y < MAP_HEIGHT)
+                    			{
+                        			int type = g_dungeon_map[map_y][map_x];
+
+                        			if (map_x == player.x && map_y == player.y)
+                            				SET_COLOR(255, 255, 0);       // 플레이어 (노랑)
+                        			else if (type == TILE_WALL)
+                            				SET_COLOR(30, 30, 30);        // 벽 (어두운 회색)
+                        			else if (type == TILE_PATH)
+                            				SET_COLOR(150, 150, 150);     // 바닥 (밝은 회색)
+						else if (type == TILE_STAIRS)
+							SET_COLOR(0, 255, 0);
+                        			else if (type == TILE_MONSTER)
+                            				SET_COLOR(255, 50, 50);       // 몬스터 (빨강)
+                        			else if (type == TILE_BOSS)
+                            				SET_COLOR(150, 0, 255);       // 보스 (보라)
+                    			}
+                    			else
+                    			{
+                        			// 맵 밖은 완전한 검은색
+                        			SET_COLOR(0, 0, 0);
+                    			}
+
+                    			FILL_RECT(tile_rect);
+                		}
+            		}
+
+            		// 하단 UI 바
+            		SDL_Rect ui_bar = {0, 500, 800, 100};
+            		SET_COLOR(40, 40, 40);
+            		FILL_RECT(ui_bar);
+        	}		
+
+		/*
+		else if (game_state == 99)
+		{
+			int tile_size = 60;
+
+			for (int y = 0; y < 5; y++)
+			{
+				for (int x = 0; x < 5; x++)
+				{
+					int mx = player.x -2 + x;
+					int my = player.y -2 + y;
+
+					SDL_Rect tile_rect = { 250 + (x * tile_size), 150 + (y * tile_size),
+						tile_size - 2, tile_size - 2 };
+
+					if (mx >= 0 && mx < g_map_width && my >= 0 && my < g_map_height)
+					{
+						if (g_fog_map[my][mx] == 1)
+						{
+							int type = g_dungeon_map[my][mx];
+
+							if (mx == player.x && my == player.y)
+								SET_COLOR(255, 255, 0);
+							else if (type == 0)
+								SET_COLOR(50, 50, 50);
+							else if (type == 1)
+								SET_COLOR(200, 200, 200);
+							else if (type == 2)
+								SET_COLOR(255, 0, 0);
+							else if (type == 3)
+								SET_COLOR(150, 0, 255);
+						}
+						else
+						{
+							SET_COLOR(20, 20, 20);
+						}
+					}
+					else
+					{
+						SET_COLOR(0, 0, 0);
+					}
+
+					FILL_RECT(tile_rect);
+				}
+			}
+
+			SDL_Rect ui_bar = {0, 500, 800, 100};
+			SET_COLOR(40, 40, 40);
+			FILL_RECT(ui_bar);
+		}
+		*/
+		else if(game_state == 3)
+		{
+			SET_COLOR(30, 10, 10);
+			SDL_Rect bg = {0, 0, 800, 600}; FILL_RECT(bg);
+
+			SET_COLOR(255, 255, 255);
+			SDL_Rect ui_border = {10, 440, 700, 150}; FILL_RECT(ui_border);
+
+			SET_COLOR(0, 0, 0);
+			SDL_Rect ui_inner = {15, 445, 770, 140}; FILL_RECT(ui_inner);
+
+			SET_COLOR(200, 0, 0);
+			SDL_Rect enemy_img = {300, 100, 200, 200}; FILL_RECT(enemy_img);
+
+			//전투 메뉴 나열 로직
+			for(int i = 0; i < battle_menu_count; i++)
+			{
+				SDL_Rect opt = {550, 460 + (i * 25), 200, 20};
+				if (menu_index == i) SET_COLOR(255, 255, 0);
+				else SET_COLOR(150, 150, 150);
+				FILL_RECT(opt);
+			}
+		}
+		else if (game_state >= 4 && game_state <= 6)
+		{
+			SET_COLOR(30, 10, 10);
+			SDL_Rect bg = {0, 0, 800, 600}; FILL_RECT(bg);
+
+			//팝업 창? 같은 박스 **수정필요
+			if (game_state == 4) SET_COLOR(20, 40, 80);
+			else if (game_state == 5) SET_COLOR(20, 80, 40);
+			else SET_COLOR(60, 60, 60);
+
+			SDL_Rect popup = {250, 200, 300, 200}; FILL_RECT(popup);
+			
+			int count = 2;
+			if(game_state == 4) count = current_skill_count;
+			for(int i = 0; i <count; i++)
+			{
+				SDL_Rect opt = {300, 230 + (i * 50), 200, 30};
+				if (menu_index == i) SET_COLOR(255, 255, 0);
+				else SET_COLOR(150, 150, 150);
+				FILL_RECT(opt);
+			}
+		}
+		
+		else if (game_state == 7)
+		{
+			SDL_Rect full_bg = {0, 0, 800, 600};
+
+			if (player.hp <= 0)
+				SET_COLOR(100, 0, 0);
+			else
+				SET_COLOR(0, 50, 100);
+			FILL_RECT(full_bg);
+
+			SDL_Rect res_box = {200, 200, 400, 200};
+			SET_COLOR(255, 255, 255);
+			FILL_RECT(res_box);
+		}
+
+
+
+
+
+		SDL_RenderPresent(renderer);			//모니터 화면 출력
+	}
+
+	//메모리 해제 (메모리 누수 방지)
+	SDL_DestroyRenderer(renderer);
+	SDL_DestroyWindow(window);
+	SDL_Quit();
+
+	return 0;
+}
+
+
+--- map.c ---
+#include "map.h"
+#include "monster.h"
+#include <stdio.h>
+
+#define MIN_ROOM_SIZE  6
+#define MAX_ROOM_SIZE  10
+#define BOSS_ROOM_W    18
+#define BOSS_ROOM_H    14
+#define ROOM_MARGIN    3
+
+int g_dungeon_map[MAP_HEIGHT][MAP_WIDTH];
+
+//map.h 와 동일 이유 수정 (0219)
+// 아까 선언한 실제 전역변수 생성
+//int g_dungeon_map[MAX_MAP_Y][MAX_MAP_X];
+//int g_fog_map[MAX_MAP_Y][MAX_MAP_X];
+//int g_map_width = 7;
+//int g_map_height = 15;
+
+//방을 이어주는 통로  함수 생성
+void connect_points(int x1, int y1, int x2, int y2)
+{
+    int cx = x1;
+    int cy = y1;
+    while (cx != x2)
+    {
+        g_dungeon_map[cy][cx] = TILE_PATH;
+        cx += (x1 < x2) ? 1 : -1;
+    }
+    while (cy != y2)
+    {
+        g_dungeon_map[cy][cx] = TILE_PATH;
+        cy += (y1 < y2) ? 1 : -1;
+    }
+}
+
+void init_map(int difficulty, int current_floor, int max_floor, Character *player)
+{
+    /* 1. 맵 전체를 벽(TILE_WALL)으로 초기화 */
+    for (int y = 0; y < MAP_HEIGHT; y++)
+    {
+        for (int x = 0; x < MAP_WIDTH; x++)
+        {
+            g_dungeon_map[y][x] = TILE_WALL;
+        }
+    }
+
+    /* 2. 난이도 및 층수에 따른 방 개수 설정 */
+    int room_limit = 3 + (difficulty * 2);
+    if (current_floor == max_floor)
+    {
+        room_limit = 4;
+    }
+
+    Room rooms[10];
+    int actual_rooms = 0;
+
+    /* 3. 방 및 복도 생성 로직 */
+    for (int i = 0; i < room_limit; i++)
+    {
+        Room r;
+        /* 마지막 층의 마지막 방은 보스방으로 크게 만듦 */
+        if (current_floor == max_floor && i == room_limit - 1)
+        {
+            r.w = BOSS_ROOM_W;
+            r.h = BOSS_ROOM_H;
+        }
+        else
+        {
+            r.w = GET_RAND(MIN_ROOM_SIZE, MAX_ROOM_SIZE);
+            r.h = GET_RAND(MIN_ROOM_SIZE, MAX_ROOM_SIZE);
+        }
+	
+	int is_overlap;
+	int tries = 0;
+	
+	do
+        {
+            is_overlap = 0;
+            r.x = GET_RAND(ROOM_MARGIN, MAP_WIDTH - r.w - ROOM_MARGIN);
+            r.y = GET_RAND(ROOM_MARGIN, MAP_HEIGHT - r.h - ROOM_MARGIN);
+
+            for (int j = 0; j < actual_rooms; j++)
+            {
+                // 이전 방들과 위치가 겹치는지 사각형 충돌 검사 (1칸 여유분 포함)
+                if (!(r.x + r.w + 1 < rooms[j].x || r.x > rooms[j].x + rooms[j].w + 1 ||
+                      r.y + r.h + 1 < rooms[j].y || r.y > rooms[j].y + rooms[j].h + 1))
+                {
+                    is_overlap = 1;
+                    break;
+                }
+            }
+            tries++;
+        } while (is_overlap && tries < 100);
+
+
+        /* 방 바닥 뚫기 */
+        for (int py = r.y; py < r.y + r.h; py++)
+        {
+            for (int px = r.x; px < r.x + r.w; px++)
+            {
+                g_dungeon_map[py][px] = TILE_PATH;
+            }
+        }
+        
+        rooms[actual_rooms++] = r;
+
+        /* 이전 방과 복도 연결 */
+        if (i > 0)
+        {
+            connect_points(rooms[i-1].x + rooms[i-1].w/2, rooms[i-1].y + rooms[i-1].h/2, r.x + r.w/2, r.y + r.h/2);
+        }
+    }
+
+    /* 4. 플레이어 시작 위치 지정 (첫 번째 방의 정중앙) */
+    if (player != NULL)
+    {
+        player->x = rooms[0].x + rooms[0].w / 2;
+        player->y = rooms[0].y + rooms[0].h / 2;
+    }
+
+    /* 5. 계단 및 보스 타일 배치 (마지막 방의 정중앙) */
+    Room last = rooms[actual_rooms - 1];
+    int tx = last.x + last.w / 2;
+    int ty = last.y + last.h / 2;
+    
+    if (current_floor == max_floor)
+    {
+        g_dungeon_map[ty][tx] = TILE_BOSS;
+    }
+    else
+    {
+        g_dungeon_map[ty][tx] = TILE_STAIRS;
+    }
+	
+    int is_boss_floor = (current_floor == max_floor) ? 1 : 0;
+    spawn_monsters_in_rooms(rooms, actual_rooms, difficulty, is_boss_floor);
+
+    /* 6. 완료 메시지 (60x60 고정) */
+    printf("[시스템] %d층 던전 생성 완료 (크기: %dx%d)\n", current_floor, MAP_WIDTH, MAP_HEIGHT);
+}
+
+//전장의 안개 걷는 함수
+/*void reveal_fog(int px, int py)
+{
+	for(int y = py -2; y <= py +2; y++)
+	{
+		for(int x = px -2; x <= px + 2; x++)
+		{
+			//맵 이탈 확인 로직
+			if(y >= 0 && y < g_map_height && x >= 0 && x < g_map_width)
+			{
+				g_fog_map[y][x] = 1;
+			}
+		}
+	}
+}
+*/
+
+/*
+//맵 초기화 함수
+void init_map(int difficulty, Character *player)
+{
+	for(int y = 0; y < MAX_MAP_Y; y++)
+		{
+			for(int x = 0; x < MAX_MAP_X; x++)
+			{
+				g_dungeon_map[y][x] = TILE_WALL;
+				g_fog_map[y][x] = 0;
+			}
+		}
+	if(difficulty == 0)			//easy 난이도
+	{
+		g_map_width = 7;
+		g_map_height = 15;
+
+		player->x = 3;
+		player->y = 13;
+
+		g_dungeon_map[1][3] = TILE_BOSS;
+
+		for(int y = 2; y < 14; y++)
+		{
+			g_dungeon_map[y][3] = TILE_PATH;
+		}
+		
+		//던전  갈림길
+		g_dungeon_map[10][2] = TILE_PATH; g_dungeon_map[10][4] = TILE_PATH;
+		g_dungeon_map[9][2] = TILE_PATH; g_dungeon_map[9][4] = TILE_PATH;
+
+		g_dungeon_map[7][3] = TILE_MONSTER;
+		g_dungeon_map[4][3] = TILE_MONSTER;
+	}
+	else 					//normal & hard 난이도
+	{
+		g_map_width = 15;
+		g_map_height = 25;
+
+        	player->x = 7;
+        	player->y = 23;
+
+        	g_dungeon_map[1][7] = TILE_BOSS;
+
+        	// 메인 도로
+       		for(int y = 2; y < 24; y++) g_dungeon_map[y][7] = TILE_PATH;
+
+        	// 미로형 우회로
+        	for(int y = 5; y < 20; y++)
+        	{
+            		if(y % 2 == 0) { g_dungeon_map[y][5] = TILE_PATH; g_dungeon_map[y][9] = TILE_PATH; }
+            		else { g_dungeon_map[y][4] = TILE_PATH; g_dungeon_map[y][10] = TILE_PATH; }
+        	}	
+
+        	// 가로 연결 통로
+        	g_dungeon_map[10][6] = TILE_PATH; g_dungeon_map[10][8] = TILE_PATH;
+        	g_dungeon_map[18][6] = TILE_PATH; g_dungeon_map[18][8] = TILE_PATH;
+
+        	// 몬스터 대량 배치
+        	g_dungeon_map[15][7] = TILE_MONSTER;
+        	g_dungeon_map[12][5] = TILE_MONSTER;
+        	g_dungeon_map[12][9] = TILE_MONSTER;
+        	g_dungeon_map[3][7] = TILE_MONSTER; // 중간 보스
+    	}	
+	
+	reveal_fog(player->x, player->y);
+
+	printf("[시스템] 맵 생성 완료 (크기: %dx%d)\n", g_map_width, g_map_height);
+}
+*/
+	
+--- map.h ---
+#ifndef MAP_H
+#define MAP_H
+
+#include "common.h"
+
+#define MAP_WIDTH  40
+#define MAP_HEIGHT 40
+
+
+#define TILE_WALL    0
+#define TILE_PATH    1
+#define TILE_MONSTER 2
+#define TILE_BOSS    3
+#define TILE_CHEST   4
+#define TILE_STAIRS  5
+
+
+// 몬스터 이동범위 제한을 위한 맵 구조체
+typedef struct
+{
+    int x, y, w, h;
+} Room;
+
+//맵 타일 상수화 및 수정 (0219)
+//맵 전역변수
+//extern int g_dungeon_map[MAX_MAP_Y][MAX_MAP_X];		//맵 데이터
+//extern int g_fog_map[MAX_MAP_Y][MAX_MAP_X];		//안개 데이터
+//extern int g_map_width;
+//extern int g_map_height;
+extern int g_dungeon_map[MAP_HEIGHT][MAP_WIDTH];
+
+//void init_map(int difficulty, Character *player);
+//void reveal_fog(int px, int py);			//맵 수정 + 안개 데이터 삭제(0219)
+
+void init_map(int difficulty, int current_floor, int max_floor, Character *player);
+
+#endif
+
+
+--- monster.c ---
+#include "monster.h"
+#include <stdio.h>
+
+Enemy g_monsters[MAX_MONSTERS];
+int g_monster_count = 0;
+
+
+void spawn_monsters_in_rooms(Room* rooms, int room_count, int difficulty, int is_boss_floor)
+{
+    g_monster_count = 0;
+
+    // 첫 번째 방(방 번호 0)은 플레이어 시작 지점이므로 몬스터 생성 제외
+    for (int i = 1; i < room_count; i++)
+    {
+        // 보스 층이고 마지막 방이면 보스 1마리만 스폰
+        if (is_boss_floor && i == room_count - 1)
+        {
+            Enemy* boss = &g_monsters[g_monster_count++];
+            sprintf(boss->name, "Boss");
+            boss->hp = 500; boss->max_hp = 500; boss->atk = 20;
+            boss->x = rooms[i].x + rooms[i].w / 2;
+            boss->y = rooms[i].y + rooms[i].h / 2;
+            boss->min_x = rooms[i].x; boss->max_x = rooms[i].x + rooms[i].w - 1;
+            boss->min_y = rooms[i].y; boss->max_y = rooms[i].y + rooms[i].h - 1;
+            boss->is_alive = 1;
+	    boss->ignore_turns = 0;
+            continue; // 보스방은 일반몹 생략
+        }
+	
+	// 해보니까 너무 많이 나와서 수정
+        // 일반 방: 난이도에 따라 방당 1~3마리 스폰
+        // int mobs_in_room = GET_RAND(1, 2 + difficulty);
+        int mobs_in_room = 1;
+	for (int m = 0; m < mobs_in_room; m++)
+        {
+            if (g_monster_count >= MAX_MONSTERS) break;
+
+            Enemy* e = &g_monsters[g_monster_count++];
+            sprintf(e->name, "Slime");
+            e->hp = 30; e->max_hp = 30; e->atk = 5;
+
+            // 방 안의 랜덤 좌표에 스폰
+            e->x = GET_RAND(rooms[i].x, rooms[i].x + rooms[i].w - 1);
+            e->y = GET_RAND(rooms[i].y, rooms[i].y + rooms[i].h - 1);
+
+            // 이동 제한 구역(고향 방) 설정
+            e->min_x = rooms[i].x; e->max_x = rooms[i].x + rooms[i].w - 1;
+            e->min_y = rooms[i].y; e->max_y = rooms[i].y + rooms[i].h - 1;
+            e->is_alive = 1;
+	    e->ignore_turns = 0;
+            // 맵에 몬스터 타일 찍기
+            g_dungeon_map[e->y][e->x] = TILE_MONSTER;
+        }
+    }
+}
+
+// [추가] 모든 몬스터의 AI를 한 번에 업데이트하는 함수 (플레이어가 움직일 때 호출)
+void update_all_monsters_ai(int player_x, int player_y)
+{
+    for (int i = 0; i < g_monster_count; i++)
+    {
+        Enemy* e = &g_monsters[i];
+        if (!e->is_alive || g_dungeon_map[e->y][e->x] == TILE_BOSS) continue; // 보스는 일단 대기
+	
+	if (e->ignore_turns > 0)
+	{
+		e->ignore_turns--;
+		continue;
+	}
+
+        int dx = abs(e->x - player_x);
+        int dy = abs(e->y - player_y);
+        int nx = e->x, ny = e->y;
+
+        // 추격 (거리 6 이하) -> ( 3으로 변경)
+        if (player_x >= e->min_x && player_x <= e->max_x && player_y >= e->min_y && player_y <= e->max_y && (dx + dy <= 3))
+        {
+            if (e->x < player_x) nx++; else if (e->x > player_x) nx--;
+            else if (e->y < player_y) ny++; else if (e->y > player_y) ny--;
+        }
+        else // 배회
+        {
+            int dir = GET_RAND(0, 4);
+            if (dir == 0) ny--; else if (dir == 1) ny++;
+            else if (dir == 2) nx--; else if (dir == 3) nx++;
+        }
+
+        // 이동 가능성 검증 및 맵 반영
+        if (nx >= e->min_x && nx <= e->max_x && ny >= e->min_y && ny <= e->max_y)
+        {
+            if (g_dungeon_map[ny][nx] == TILE_PATH)
+            {
+                g_dungeon_map[e->y][e->x] = TILE_PATH; // 예전 자리 지우기
+                e->x = nx; e->y = ny;
+                g_dungeon_map[e->y][e->x] = TILE_MONSTER; // 새 자리 그리기
+            }
+        }
+    }
+}
+
+/*
+Enemy *create_enemy(char *name, int hp, int atk)
+{
+	Enemy *new_enemy = (Enemy*)malloc(sizeof(Enemy));
+
+	if (new_enemy == NULL)
+	{
+		printf("메모리 할당 실패!\n");
+		return NULL;
+	}
+
+	new_enemy -> name = name;
+	new_enemy -> hp = hp;
+	new_enemy->max_hp = hp;
+        new_enemy->atk = atk;
+        new_enemy->next = NULL;
+
+	printf("[시스템] 몬스터 '%s' 소환 완료\n", name);
+	return new_enemy;
+}
+*/
+
+void free_enemy(Enemy *target)
+	{
+		if (target != NULL)
+		{
+			printf("[시스템] 몬스터 '%s' 메모리 해제\n", target ->name);
+			free(target);
+		}
+	}
+
+--- monster.h ---
+#ifndef MONSTER_H
+#define MONSTER_H
+
+#include "common.h"
+#include "map.h"
+
+typedef struct
+{
+    char name[20];
+    int hp, max_hp, atk;
+    int x, y;
+    int min_x, max_x; // 몬스터 활동 구역 (방 경계)
+    int min_y, max_y;
+    int is_alive;
+    int ignore_turns;
+} Enemy;
+
+#define MAX_MONSTERS 30
+extern Enemy g_monsters[MAX_MONSTERS];
+extern int g_monster_count;
+
+void spawn_monsters_in_rooms(Room* rooms, int room_count, int difficulty, int is_boss_floor);
+void update_all_monsters_ai(int player_x, int player_y);
+void free_enemy(Enemy *target);
+
+//Enemy *create_enemy(char *name, int hp, int atk);
+//void free_enemy(Enemy *target);
+
+
+#endif

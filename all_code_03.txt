@@ -1,0 +1,836 @@
+#include <SDL2/SDL.h>		//SDL2 헤더 파일
+#include <SDL2/SDL_ttf.h>
+#include <SDL2/SDL_image.h>
+#include <stdlib.h>
+#include <time.h>
+#include <stdio.h>
+#include "monster.h"
+#include "map.h"
+#include "ui.h"
+#include "common.h"
+TTF_Font* g_font = NULL;
+SDL_Texture* g_p_img = NULL;
+SDL_Texture* g_e_img = NULL;
+SDL_Texture* main_bg = NULL;
+
+#define KEY e.key.keysym.sym	//75줄
+#define SET_COLOR(r,g,b) SDL_SetRenderDrawColor(renderer, r, g, b, 255)
+#define FILL_RECT(rect) SDL_RenderFillRect(renderer, &rect)
+#define GET_RAND(min, max) (rand() % (max - min + 1 ) + min) 	//랜덤 난수 범위 구현
+
+//난이도 설정 전역 변수
+char *diff_names[] = {"Slime Forest", "Goblin Cave", "Demon Castle"};
+//전투 시 사용 가능한 메뉴 나열
+char *battle_menu[] = {"Attack", "Skill", "Item", "Defense", "Run"};
+//
+char *warrior_skills[] = {"Power Strike", "Whirlwind"};		//휠이 아닌 훨윈드이다.
+char *mage_skills[] = 	{"Magic Arrow", "Meteor"};		
+char *item_menu[] = {"HP Potion", "MP Potion"};
+
+char **current_skills; 					 	//더블 포인터로 직업 스킬 연결
+
+int saved_map_x = 0;						//전투 후 복귀를 위한 좌표
+int saved_map_y = 0;
+
+int main(int argc, char *argv[])
+{	
+	//배열 크기 변수 설정
+	int diff_count = sizeof(diff_names) / sizeof(diff_names[0]);
+	int current_skill_count = 0;
+	int battle_menu_count = sizeof(battle_menu) / sizeof(battle_menu[0]);
+	int item_menu_count = sizeof(item_menu) / sizeof(item_menu[0]);
+	srand(time(NULL));
+
+	int difficulty = 0;
+	int hp_potions = 2;
+	int mp_potions = 2;
+	int current_floor = 1;
+	int max_floor = 3;	
+
+	//시스템 초기화 후 부팅 확인 여부 판단
+	if (SDL_Init(SDL_INIT_VIDEO) < 0){				//시스템 에러 확인
+		printf("초기화 실패 에러내용: %s\n", SDL_GetError());	//에러 이유 출력
+		return 1;
+	}
+
+	if (TTF_Init() == -1) {
+                printf("폰트 초기화 실패: %s\n", TTF_GetError());
+                return 1;
+        }
+
+        g_font = TTF_OpenFont("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20);
+        if (g_font == NULL) {
+                printf("폰트 로드 실패! (경로 확인 필요): %s\n", TTF_GetError());
+        }		
+
+
+	//윈도우 창 생성 설정	
+	SDL_Window *window = SDL_CreateWindow(
+			"RPG Project",			//창 제목
+			SDL_WINDOWPOS_CENTERED,		//창 가로 크기
+			SDL_WINDOWPOS_CENTERED,		//창 세로 크기
+			800, 600,			
+			SDL_WINDOW_SHOWN 		
+	);
+	
+	//윈도우 창 생성 성공 여부 관련 코드
+	if (window == NULL)
+	{
+		printf("윈도우 생성 실패 에러내용: %s\n",SDL_GetError());
+		SDL_Quit();
+		return 1;
+	}
+
+	//시스템 렌더 생성
+	SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+	
+	main_bg = load_ui_texture(renderer, "title.png");
+
+	//투명도 사용을 위한 코드 설정
+	SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+
+	//사용자 정의 변수
+	int menu_index = 0;	//**아마 0,1 로 게임 시작과 종료를 해둘 예정
+	int game_state = 0;
+	int is_boss = 0;
+
+	//시스템 이벤트 루프 명령어
+	int quit = 0;
+	SDL_Event e;
+	
+	//사용자 정의 데이터(캐릭터)
+	Character warrior = {150, 150, 30, 30, 20, 0, 0, 0};	//체력,최대체력,마나,최대마나,공격력
+								//
+	Character mage = {80, 80, 120, 120, 10, 0, 0, 0};
+	Character player;				//실제 플레이어 데이터 설정
+	
+	Enemy *current_monster = NULL; 			//동적할당으로 변경(2026-02-13)
+	
+	while(!quit)
+	{
+		while (SDL_PollEvent(&e) != 0)
+		{
+			if (e.type == SDL_QUIT)
+			{
+				quit = 1;
+			}
+			else if (e.type == SDL_KEYDOWN)
+			{
+				
+				if (KEY == SDLK_ESCAPE)
+				{
+					// 스킬(4), 아이템(5), 도망(6) 메뉴일 때는 전투 메인(3)으로 복귀
+					if (game_state == 4 || game_state == 5 || game_state == 6)
+					{
+						if (game_state == 4) menu_index = 1;      // 스킬 메뉴였으면 스킬 칸으로
+						else if (game_state == 5) menu_index = 2; // 아이템 메뉴였으면 아이템 칸으로
+						else if (game_state == 6) menu_index = 4; // 도망 메뉴였으면 도망 칸으로
+						game_state = 3;
+					}
+					// 그 외 상태(맵 탐험, 선택창 등)일 때만 메인화면(0)으로 탈출
+					else 
+					{
+						game_state = 0;
+						menu_index = 0;
+					}
+					continue; // ESC 처리가 끝났으므로 아래쪽 state별 입력 로직 중복 실행 방지
+				}	
+
+				if (game_state == 0)
+				{
+					if (KEY == SDLK_UP) { menu_index = 0; }
+					else if (KEY == SDLK_DOWN) { menu_index = 1; }
+					else if (KEY == SDLK_RETURN)
+					{
+						if (menu_index == 0) { game_state = 1; menu_index = 0; }
+						else { quit = 1; }
+					}
+				}
+				else if (game_state == 1)
+				{
+					if (KEY == SDLK_LEFT) { menu_index = 0; }
+					else if (KEY == SDLK_RIGHT) { menu_index = 1; }
+					else if (KEY == SDLK_RETURN)
+					{
+						if (menu_index == 0)
+						{
+							player = warrior;
+							current_skills = warrior_skills;
+							current_skill_count = 2;
+						}
+						else
+						{
+							player = mage;
+							current_skills = mage_skills;
+							current_skill_count = 2;
+						}
+						game_state = 2; menu_index = 0;
+					}	
+				}
+				else if (game_state == 2)
+				{
+					if (KEY == SDLK_UP) { if(menu_index > 0) menu_index--; }
+					else if (KEY == SDLK_DOWN) { if(menu_index < diff_count -1) menu_index++; }
+					else if (KEY == SDLK_RETURN)
+					{
+						difficulty = menu_index;
+						//나가거나 다시 입장 할 때 체력 초기화 및 포션 보충 로직
+						player.hp = player.max_hp;
+						player.mp = player.max_mp;
+						hp_potions = 2;
+						mp_potions = 2;
+						current_floor = 1;
+						init_map(difficulty, current_floor, max_floor, &player);
+						game_state = 99;
+						menu_index = 0;
+					}
+				}
+				
+				else if (game_state == 99)
+				{
+					int nx = player.x;
+					int ny = player.y;
+					int moved = 0;
+
+					if (KEY == SDLK_UP) { ny--; moved = 1; }
+					else if (KEY == SDLK_DOWN) { ny++; moved = 1; }
+					else if (KEY == SDLK_LEFT) { nx--; moved = 1; }
+					else if (KEY == SDLK_RIGHT) { nx++; moved = 1; }
+
+					if (moved && nx >= 0 && nx < MAP_WIDTH && ny >= 0 && ny < MAP_HEIGHT)
+					{
+						int target_tile = g_dungeon_map[ny][nx];
+
+						// [1] 이동 전 체크: 내가 몬스터 칸으로 들어갈 때
+						if (target_tile == TILE_MONSTER || target_tile == TILE_BOSS)
+						{
+							current_monster = NULL;
+							for (int i = 0; i < g_monster_count; i++)
+							{
+								if (g_monsters[i].is_alive && g_monsters[i].x == nx && g_monsters[i].y == ny)
+								{
+									current_monster = &g_monsters[i];
+									break;
+								}
+							}
+
+							if (current_monster != NULL)
+							{	
+								if (current_monster->ignore_turns > 0)
+								{
+									player.x = nx; player.y = ny;
+								}
+								else
+								{
+									saved_map_x = nx; saved_map_y = ny;
+									is_boss = (target_tile == TILE_BOSS);
+									game_state = 3; menu_index = 0;
+									continue; // 전투 진입 시 몬스터 AI 이동 스킵
+								}
+							}
+						}
+						else if (target_tile == TILE_STAIRS)
+						{
+							current_floor++;
+							init_map(difficulty, current_floor, max_floor, &player);
+							continue;
+						}
+						else if (target_tile == TILE_PATH)
+						{
+							player.x = nx; player.y = ny;
+						}
+
+						// [2] 플레이어 이동 후 몬스터들이 움직임
+						if (game_state == 99)
+						{
+							update_all_monsters_ai(player.x, player.y);
+						}
+
+						// [3] 이동 후 체크: 몬스터가 내 위치로 들이받았을 때 (엇갈림 방지)
+						for (int i = 0; i < g_monster_count; i++)
+						{
+							if (g_monsters[i].is_alive && g_monsters[i].x == player.x && g_monsters[i].y == player.y)
+							{
+								if (g_monsters[i].ignore_turns <= 0)
+								{
+									current_monster = &g_monsters[i];
+									saved_map_x = player.x; saved_map_y = player.y;
+									is_boss = (g_dungeon_map[player.y][player.x] == TILE_BOSS);
+									game_state = 3; menu_index = 0;
+									break;
+								}
+							}
+						}
+					}
+				}
+				
+				else if (game_state == 3)
+				{
+					if (KEY == SDLK_UP) { if(menu_index > 0) menu_index--; }
+					else if (KEY == SDLK_DOWN) { if(menu_index < battle_menu_count - 1) menu_index++; }
+					else if (KEY == SDLK_RETURN)
+					{
+						switch (menu_index)
+						{
+							case 0:
+							{
+								int final_dmg = GET_RAND(player.atk - 5, player.atk + 5);
+								current_monster->hp -= final_dmg;
+								printf("\n[공격] %s에게 %d의 데미지!\n", current_monster->name, final_dmg);
+								
+								if (current_monster->hp <= 0)
+								{
+									current_monster->hp = 0;
+									printf("%s를 처치 했습니다! 전투 승리!\n", current_monster->name);
+									g_dungeon_map[saved_map_y][saved_map_x] = TILE_PATH;
+									current_monster->is_alive = 0;
+									current_monster = NULL;
+									player.is_defending = 0;
+									if (is_boss) game_state = 7;
+									else game_state = 99;
+								}
+								else
+								{	
+									// 몬스터 반격
+									int m_dmg = GET_RAND(current_monster->atk - 2, current_monster->atk + 2);
+									if (player.is_defending)
+									{
+										m_dmg /= 2;
+										printf("[방어 성공] %s의 공격을 막아냈다! %d의 피해!\n", current_monster->name, m_dmg);
+										player.is_defending = 0; // 방어 해제
+									}
+									else
+									{
+										printf("%s의 반격! %d의 피해!\n", current_monster->name, m_dmg);
+									}
+									
+									player.hp -= m_dmg;
+									if (player.hp <= 0)
+									{
+										player.hp = 0;
+										printf("전투에서 패배했습니다...\n");
+										game_state = 7;
+									}
+								}
+								break;
+							}
+							case 1: game_state = 4; menu_index = 0; break;
+							case 2: game_state = 5; menu_index = 0; break;
+							case 3: 
+							{
+								player.is_defending = 1;
+								printf("\n[방어] 방어 태세! 몬스터의 공격을 대비합니다.\n");
+								
+								// 방어 즉시 몬스터가 때림 (턴 소모)
+								int m_dmg = GET_RAND(current_monster->atk - 2, current_monster->atk + 2);
+								m_dmg /= 2; // 방어 중이므로 무조건 데미지 반감
+								printf("[방어 성공] %s의 공격을 막아냈다! %d의 피해!\n", current_monster->name, m_dmg);
+								player.hp -= m_dmg;
+								player.is_defending = 0; // 맞고 나서 방어 해제
+								
+								if (player.hp <= 0)
+								{
+									player.hp = 0;
+									printf("전투에서 패배했습니다...\n");
+									game_state = 7;
+								}
+								break;
+							}
+							case 4: game_state = 6; menu_index = 0; break;
+						}
+
+					}
+				}
+				else if (game_state == 4) //스킬 창 로직
+				{
+					if (KEY == SDLK_UP) { if(menu_index > 0) menu_index--; }
+					else if (KEY == SDLK_DOWN) { if(menu_index < current_skill_count - 1) menu_index++; }
+					
+					else if (KEY == SDLK_RETURN)
+					{
+						int skill_dmg = 0;
+						int mp_cost = 0;
+
+						// 전사 스킬 판정
+						if (current_skills == warrior_skills) 
+						{
+							mp_cost = 15;
+							skill_dmg = player.atk * 2; // 평타 2배
+						}
+						else // 마법사 스킬 판정
+						{
+							mp_cost = 25;
+							skill_dmg = player.atk * 3; // 평타 3배
+						}
+
+						
+						if (player.mp >= mp_cost)
+						{
+							player.mp -= mp_cost;
+							current_monster->hp -= skill_dmg;
+							printf("\n[스킬] %s 발동! %s에게 %d의 피해! (소모 MP: %d)\n", current_skills[menu_index], current_monster->name, skill_dmg, mp_cost);
+
+							if (current_monster->hp <= 0)
+							{
+								// 1. 몬스터가 죽었을 때 (맵으로 복귀)
+								current_monster->hp = 0;
+								printf("%s를 처치 했습니다! 전투 승리!\n", current_monster->name);
+								g_dungeon_map[saved_map_y][saved_map_x] = TILE_PATH;
+								current_monster->is_alive = 0;
+								current_monster = NULL;
+								player.is_defending = 0;
+								if (is_boss) game_state = 7;
+								else game_state = 99;
+							}
+							else
+							{
+								// 몬스터가 살아서 반격
+								int m_dmg = GET_RAND(current_monster->atk - 2, current_monster->atk + 2);
+								printf("%s의 반격! %d의 피해!\n", current_monster->name, m_dmg);
+								player.hp -= m_dmg;
+								
+								if (player.hp <= 0)
+								{
+									// 2. 플레이어가 죽었을 때 (게임 오버)
+									player.hp = 0;
+									printf("전투에서 패배했습니다...\n");
+									game_state = 7;
+								}
+								else
+								{
+									// 3. 둘 다 살았을 때만 전투 메인으로 복귀
+									game_state = 3;
+								}
+							}
+							menu_index = 0;
+						}						
+
+						else
+						{
+							printf("\n[시스템] MP가 부족합니다! (현재 MP: %d)\n", player.mp);
+						}
+					}					
+
+					else if (KEY == SDLK_ESCAPE)
+					{
+						game_state = 3;
+						menu_index = 1; // ESC 누르면 스킬 커서로 돌아가기
+					}
+				}
+				
+				else if (game_state == 5) // 아이템 창 로직
+				{
+					if (KEY == SDLK_UP) { if(menu_index > 0) menu_index--; }
+					else if (KEY == SDLK_DOWN) { if(menu_index < item_menu_count - 1) menu_index++; }
+					else if (KEY == SDLK_RETURN)
+					{
+						int item_used = 0; // 아이템 사용 여부 플래그
+						
+						if (menu_index == 0) // HP 포션
+						{
+							if (hp_potions > 0)
+							{
+								hp_potions--;
+								player.hp += 50;
+								if (player.hp > player.max_hp) player.hp = player.max_hp;
+								printf("\n[아이템] HP 포션 사용! (현재 HP: %d/%d) [남은 개수: %d]\n", player.hp, player.max_hp, hp_potions);
+								item_used = 1;
+							}
+							else { printf("\n[시스템] 보유하신 HP 포션이 없습니다.\n"); }
+						}
+						else if (menu_index == 1) // MP 포션
+						{
+							if(mp_potions > 0)
+							{
+								mp_potions--;
+								player.mp += 30;
+								if (player.mp > player.max_mp) player.mp = player.max_mp;
+								printf("\n[아이템] MP 포션 사용! (현재 MP: %d/%d) [남은 개수: %d]\n", player.mp, player.max_mp, mp_potions);
+								item_used = 1;
+							}
+							else { printf("\n[시스템] 보유하신 MP 포션이 없습니다.\n"); }
+						}
+
+						// 아이템을 썼을 때만 몬스터가 때림 (턴 소모)
+						if (item_used)
+						{
+							int m_dmg = GET_RAND(current_monster->atk - 2, current_monster->atk + 2);
+							printf("%s의 공격! %d의 피해!\n", current_monster->name, m_dmg);
+							player.hp -= m_dmg;
+							
+							if (player.hp <= 0)
+							{
+								player.hp = 0;
+								printf("전투에서 패배했습니다...\n");
+								game_state = 7;
+							}
+							else { game_state = 3; } // 전투 메인으로 복귀
+						}
+						menu_index = 0;
+					}
+					else if (KEY == SDLK_ESCAPE)
+					{
+						game_state = 3;
+						menu_index = 2; // ESC 누르면 아이템 커서로 돌아가기
+					}
+				}
+
+				else if (game_state == 6)
+				{
+					if (KEY == SDLK_UP) { if(menu_index > 0) menu_index--; }
+					else if (KEY == SDLK_DOWN) { if(menu_index < 1) menu_index++; }
+					else if (KEY == SDLK_RETURN)
+					{
+						if(menu_index == 0) // "예" 선택 시 도망
+                        {
+                            printf("무사히 도망쳤다!\n");
+                            
+                            // 보스가 아닐 때만 무적 시간 부여 (보스는 즉시 재조우 가능하게)
+                            if (current_monster != NULL)
+                            {
+                                if (!is_boss) 
+                                {
+                                    current_monster->ignore_turns = 5; 
+                                }
+                                else 
+                                {
+                                    current_monster->ignore_turns = 0; // 보스는 무적 없음
+                                }
+                            }
+
+                            current_monster = NULL; // 조우 중인 몬스터 정보 초기화
+                            game_state = 99;        // 던전으로 복귀
+                        } 
+                        else 
+                        { 
+                            game_state = 3;         // "아니오" 선택 시 다시 전투 메뉴로
+                        }
+						menu_index = 0;
+					}		
+				}
+				else if (game_state == 7)
+				{
+					if (KEY == SDLK_RETURN)
+					{
+						game_state = 0;
+						menu_index = 0;
+					}
+				}
+			}
+		}
+
+		SET_COLOR(0,0,0);
+		SDL_RenderClear(renderer);			
+		
+		if (game_state == 0)
+		{	
+			draw_main_background(renderer, main_bg);
+
+
+			//시작 메뉴 바 위치 설정
+			SDL_Rect start_bar = {250, 320, 300, 50};
+			SDL_Rect quit_bar = {250, 390, 300, 50};
+			
+			//시작 버튼 그리기
+			
+
+
+			if (menu_index == 0) SET_COLOR(255, 255, 0); else SET_COLOR(100, 100, 100);
+			FILL_RECT(start_bar);
+			if (menu_index == 1) SET_COLOR(255, 255, 0); else SET_COLOR(100, 100, 100);
+			FILL_RECT(quit_bar);
+			
+			render_text(renderer, "RPG PROJECT", 320, 200, 255, 255, 255);
+			render_text(renderer, "GAME START", 330, 335, 0 ,0, 0);
+			render_text(renderer, "EXIT", 370, 405, 0 ,0, 0);
+		}
+		else if(game_state == 1)
+		{
+			SET_COLOR(0, 0, 100);
+			SDL_Rect full_screen = {0, 0, 800, 600};
+			FILL_RECT(full_screen);
+
+			/* 1. 상단 안내 문구 */
+			render_text(renderer, "SELECT YOUR CLASS", 300, 50, 255, 255, 255);
+
+			/* 2. 전사(Warrior) 박스 그리기 */
+			SDL_Rect warrior_img = {100, 150, 200, 250};
+			if (menu_index == 0) SET_COLOR(255, 255, 0); // 선택 시 노란색
+			else SET_COLOR(100, 100, 100);               // 비선택 시 회색
+			FILL_RECT(warrior_img);
+
+			/* 3. 마법사(Mage) 박스 그리기 */
+			SDL_Rect mage_img = {500, 150, 200, 250};
+			if (menu_index == 1) SET_COLOR(0, 255, 255); // 선택 시 하늘색
+			else SET_COLOR(100, 100, 100);               // 비선택 시 회색
+			FILL_RECT(mage_img);
+
+			/* 4. 박스 위에 직업 이름과 스탯 글씨 렌더링 (검은색 글씨) */
+			// 전사 스탯
+			render_text(renderer, "WARRIOR", 145, 170, 0, 0, 0);
+			render_text(renderer, "HP : 150", 120, 230, 0, 0, 0);
+			render_text(renderer, "MP : 30",  120, 270, 0, 0, 0);
+			render_text(renderer, "ATK: 20",  120, 310, 0, 0, 0);
+
+			// 마법사 스탯
+			render_text(renderer, "MAGE", 565, 170, 0, 0, 0);
+			render_text(renderer, "HP : 80",  520, 230, 0, 0, 0);
+			render_text(renderer, "MP : 120", 520, 270, 0, 0, 0);
+			render_text(renderer, "ATK: 10",  520, 310, 0, 0, 0);
+
+		}
+		else if(game_state == 2)
+		{
+			SET_COLOR(20, 20, 40);
+			SDL_Rect full_screen = {0, 0, 800, 600};
+			FILL_RECT(full_screen);
+
+			/* 1. 상단 안내 문구 */
+			render_text(renderer, "SELECT DIFFICULTY", 280, 50, 255, 255, 255);
+
+			for(int i = 0; i < diff_count; i++)
+			{
+				SDL_Rect bar = {250, 150 + (i * 120), 300, 70};
+				if (menu_index == i) SET_COLOR(255, 255, 0); 
+				else SET_COLOR(150, 150, 150);
+				FILL_RECT(bar);
+
+				/* 2. 버튼 위에 난이도 텍스트 (Easy, Medium, Hard) 출력 */
+				// diff_names[i]를 가져와서 가운데 정렬 느낌으로 좌표 설정
+				render_text(renderer, diff_names[i], 310, 175 + (i * 120), 0, 0, 0);
+			}
+		
+		}
+		else if (game_state == 99)
+		{
+			// [변경] 화면에 11x11 칸을 렌더링하기 위해 타일 크기를 줄임 (40px)
+			int tile_size = 40;
+			int camera_w = 11;
+			int camera_h = 11;
+			// UI를 제외한 게임 화면을 중앙에 배치하기 위한 오프셋 (여백)
+			int offset_x = (800 - (camera_w * tile_size)) / 2;
+			int offset_y = 30; 
+			for (int cy = 0; cy < camera_h; cy++)
+			{
+				for (int cx = 0; cx < camera_w; cx++)
+				{
+					// 카메라 중심을 플레이어 좌표로 계산
+					int map_x = player.x - (camera_w / 2) + cx;
+					int map_y = player.y - (camera_h / 2) + cy;
+					SDL_Rect tile_rect = { offset_x + (cx * tile_size), offset_y + (cy * tile_size), tile_size - 1, tile_size - 1 };
+					// 맵 범위 내부인지 확인
+					if (map_x >= 0 && map_x < MAP_WIDTH && map_y >= 0 && map_y < MAP_HEIGHT)
+					{
+						int type = g_dungeon_map[map_y][map_x];
+						if (map_x == player.x && map_y == player.y) SET_COLOR(255, 255, 0); // 플레이어 (노랑)
+						else if (type == TILE_WALL) SET_COLOR(30, 30, 30); // 벽 (어두운 회색)
+						else if (type == TILE_PATH) SET_COLOR(150, 150, 150); // 바닥 (밝은 회색)
+						else if (type == TILE_STAIRS) SET_COLOR(0, 255, 0);
+						else if (type == TILE_MONSTER) SET_COLOR(255, 50, 50); // 몬스터 (빨강)
+						else if (type == TILE_BOSS) SET_COLOR(150, 0, 255); // 보스 (보라)
+					}
+					else SET_COLOR(0, 0, 0); // 맵 밖은 완전한 검은색
+					FILL_RECT(tile_rect);
+				}
+			}
+			// 하단 UI 바
+		// 하단 UI 바 배경
+                        SDL_Rect ui_bar = {0, 500, 800, 100};
+                        SET_COLOR(20, 20, 20);
+                        FILL_RECT(ui_bar);
+
+                        // HP 바 레이아웃
+                        SDL_Rect h_bg = {30, 540, 250, 20};
+                        SET_COLOR(100, 0, 0);
+                        FILL_RECT(h_bg);
+
+                        float h_r = (float)player.hp / player.max_hp;
+                        SDL_Rect h_f = {30, 540, (int)(250 * h_r), 20};
+                        SET_COLOR(50, 255, 50);
+                        FILL_RECT(h_f);
+
+                        render_text(renderer, "HP", 30, 515, 255, 255, 255);
+
+                        // MP 바 레이아웃
+                        SDL_Rect m_bg = {320, 540, 180, 15};
+                        SET_COLOR(0, 0, 100);
+                        FILL_RECT(m_bg);
+
+                        float m_r = (float)player.mp / player.max_mp;
+                        SDL_Rect m_f = {320, 540, (int)(180 * m_r), 15};
+                        SET_COLOR(100, 200, 255);
+                        FILL_RECT(m_f);
+
+                        render_text(renderer, "MP", 320, 515, 255, 255, 255);	
+		}
+		
+		else if (game_state == 3)
+                        {
+                                // 전투 배경
+                                SET_COLOR(50, 0, 0);
+                                SDL_Rect battle_bg = {0, 0, 800, 600};
+                                FILL_RECT(battle_bg);
+
+                                /* 1. 몬스터 정보 */
+                                if (current_monster != NULL)
+                                {
+                                        SDL_Rect m_hp_bg = {250, 70, 300, 20};
+                                        SET_COLOR(60, 60, 60);
+                                        FILL_RECT(m_hp_bg);
+
+                                        float m_r = (float)current_monster->hp / current_monster->max_hp;
+                                        SDL_Rect m_fill = {250, 70, (int)(300 * m_r), 20};
+                                        SET_COLOR(255, 0, 0);
+                                        FILL_RECT(m_fill);
+
+                                        render_text(renderer, current_monster->name, 250, 40, 255, 255, 255);
+                                }
+
+                                /* 2. 플레이어 게이지 */
+                                render_text(renderer, "PLAYER HP", 50, 320, 255, 255, 255);
+                                SDL_Rect p_hp_bg = {50, 345, 250, 20};
+                                SET_COLOR(100, 0, 0);
+                                FILL_RECT(p_hp_bg);
+
+                                float p_r = (float)player.hp / player.max_hp;
+                                SDL_Rect p_fill = {50, 345, (int)(250 * p_r), 20};
+                                SET_COLOR(0, 255, 100);
+                                FILL_RECT(p_fill);
+
+                                /* 3. 5버튼 세로 메뉴 (순서: 공격, 스킬, 아이템, 방어, 도망) */
+                                char* b_menu[] = {"1. ATTACK", "2. SKILL", "3. ITEM", "4. DEFEND", "5. RUN"};
+                                
+                                for (int i = 0; i < 5; i++)
+                                {
+                                        SDL_Rect m_box = {50, 380 + (i * 42), 200, 38};
+                                        if (menu_index == i) SET_COLOR(255, 255, 0);
+                                        else SET_COLOR(60, 60, 60);
+                                        
+                                        FILL_RECT(m_box);
+                                        render_text(renderer, b_menu[i], 70, 390 + (i * 42), 0, 0, 0);
+                                }
+                        }
+                        else if (game_state >= 4 && game_state <= 6)
+                        {
+                                SET_COLOR(30, 10, 10);
+                                SDL_Rect bg = {0, 0, 800, 600};
+                                FILL_RECT(bg);
+
+                                if (game_state == 4) SET_COLOR(20, 40, 80);      // 스킬창 (파랑)
+                                else if (game_state == 5) SET_COLOR(20, 80, 40); // 아이템창 (초록)
+                                else SET_COLOR(60, 40, 20);                      // 도망창 (갈색)
+
+                                SDL_Rect popup = {250, 200, 300, 200};
+                                FILL_RECT(popup);
+
+                                if (game_state == 4) // 스킬 선택 (정확한 이름!)
+                                {
+                                        render_text(renderer, "--- SKILL LIST ---", 285, 210, 255, 255, 255);
+                                        char* s_list[] = {"1. POWER STRIKE", "2. WHIRLWIND"};
+                                        for (int i = 0; i < 2; i++)
+                                        {
+                                                SDL_Rect opt = {300, 260 + (i * 60), 200, 40};
+                                                if (menu_index == i) SET_COLOR(255, 255, 0);
+                                                else SET_COLOR(150, 150, 150);
+                                                FILL_RECT(opt);
+                                                render_text(renderer, s_list[i], 310, 270 + (i * 60), 0, 0, 0);
+                                        }
+                                }
+                                else if (game_state == 5) // 아이템 선택 (이름 명시!)
+                                {
+                                        render_text(renderer, "--- ITEM LIST ---", 290, 210, 255, 255, 255);
+                                        char* i_list[] = {"1. HP POTION", "2. MP POTION"};
+                                        for (int i = 0; i < 2; i++)
+                                        {
+                                                SDL_Rect opt = {300, 260 + (i * 60), 200, 40};
+                                                if (menu_index == i) SET_COLOR(255, 255, 0);
+                                                else SET_COLOR(150, 150, 150);
+                                                FILL_RECT(opt);
+                                                render_text(renderer, i_list[i], 310, 270 + (i * 60), 0, 0, 0);
+                                        }
+                                }
+                                else if (game_state == 6) // 도망 확인 (텍스트 추가!)
+                                {
+                                        render_text(renderer, "REALLY RUN AWAY?", 280, 230, 255, 255, 255);
+                                        char* r_list[] = {"1. YES", "2. NO"};
+                                        for (int i = 0; i < 2; i++)
+                                        {
+                                                SDL_Rect opt = {300, 280 + (i * 50), 200, 40};
+                                                if (menu_index == i) SET_COLOR(255, 255, 0);
+                                                else SET_COLOR(150, 150, 150);
+                                                FILL_RECT(opt);
+                                                render_text(renderer, r_list[i], 350, 290 + (i * 50), 0, 0, 0);
+                                        }
+                                }
+                        }
+
+		else if (game_state == 7)
+		{
+			SDL_Rect full_bg = {0, 0, 800, 600};
+			if (player.hp <= 0) SET_COLOR(100, 0, 0);
+			else SET_COLOR(0, 50, 100);
+			FILL_RECT(full_bg);
+		}
+
+		SDL_RenderPresent(renderer);			//모니터 화면 출력
+	}
+	//메모리 해제 (메모리 누수 방지)
+	SDL_DestroyRenderer(renderer);
+	SDL_DestroyWindow(window);
+	SDL_Quit();
+
+	return 0;
+}
+#include "ui.h"
+#include <stdio.h>
+
+void render_text(SDL_Renderer* renderer, const char* text, int x, int y, Uint8 r, Uint8 g, Uint8 b)
+{
+    if (g_font == NULL) return;
+
+    SDL_Color color = {r, g, b, 255};
+    SDL_Surface* surface = TTF_RenderUTF8_Solid(g_font, text, color);
+    
+    if (surface != NULL)
+    {
+        SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+        if (texture != NULL)
+        {
+            SDL_Rect dest_rect = { x, y, surface->w, surface->h };
+            SDL_RenderCopy(renderer, texture, NULL, &dest_rect);
+            SDL_DestroyTexture(texture);
+        }
+        SDL_FreeSurface(surface);
+    }
+
+SDL_Texture* load_ui_texture(SDL_Renderer* renderer, const char* path)
+{
+    SDL_Texture* tex = IMG_LoadTexture(renderer, path);
+    if (tex == NULL)
+    {
+        printf("Texture Load Error (%s): %s\n", path, IMG_GetError());
+    }
+    return tex;
+}
+
+void draw_main_background(SDL_Renderer* renderer, SDL_Texture* bg_tex)
+{
+    if (bg_tex != NULL)
+    {
+        // 화면 전체(800x600)에 이미지를 꽉 채워서 그리는 거야아!
+        SDL_RenderCopy(renderer, bg_tex, NULL, NULL);
+    }
+}}
+#ifndef UI_H
+#define UI_H
+
+#include "common.h"
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_image.h>
+
+void render_text(SDL_Renderer* renderer, const char* text, int x, int y, Uint8 r, Uint8 g, Uint8 b);
+void draw_main_background(SDL_Renderer* renderer, SDL_Texture* bg_tex);
+SDL_Texture* load_ui_texture(SDL_Renderer* renderer, const char* path);
+
+
+#endif
