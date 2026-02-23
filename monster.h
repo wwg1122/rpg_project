@@ -19,7 +19,7 @@ typedef struct
 extern Enemy g_monsters[MAX_MONSTERS];
 extern int g_monster_count;
 
-void spawn_monsters_in_rooms(Room* rooms, int room_count, int difficulty, int is_boss_floor);
+void spawn_monsters_in_rooms(Room* rooms, int room_count, int difficulty, int is_boss_floor, int current_floor);
 void update_all_monsters_ai(int player_x, int player_y);
 void free_enemy(Enemy *target);
 

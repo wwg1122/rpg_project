@@ -116,8 +116,22 @@ void init_map(int difficulty, int current_floor, int max_floor, Character *playe
         int ty = last.y + last.h / 2;
         g_dungeon_map[ty][tx] = (current_floor == max_floor) ? TILE_BOSS : TILE_STAIRS;
 
+	//상자 생성 함수 추가
+	for (int i = 1; i < actual_rooms - 1; i++)
+        {
+            if (GET_RAND(1, 100) <= 40)
+            {
+                int cx = GET_RAND(rooms[i].x + 1, rooms[i].x + rooms[i].w - 2);
+                int cy = GET_RAND(rooms[i].y + 1, rooms[i].y + rooms[i].h - 2);
+                if (g_dungeon_map[cy][cx] == TILE_PATH)
+                {
+                    g_dungeon_map[cy][cx] = TILE_CHEST;
+                }
+            }
+        }
+
         // 몬스터 생성
-        spawn_monsters_in_rooms(rooms, actual_rooms, difficulty, (current_floor == max_floor));
+        spawn_monsters_in_rooms(rooms, actual_rooms, difficulty, (current_floor == max_floor), current_floor);
     }
 
     printf("[시스템] %d층 던전 생성 완료 (방: %d개)\n", current_floor, actual_rooms);

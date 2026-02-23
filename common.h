@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <SDL2/SDL_ttf.h>
 #include <SDL2/SDL_image.h>
+
 //키 매크로 정리
 #define KEY e.key.keysym.sym
 #define SET_COLOR(r,g,b) SDL_SetRenderDrawColor(renderer, r, g, b, 255)
@@ -16,6 +17,8 @@
 #define TILE_PATH 1
 #define TILE_MONSTER 2
 #define TILE_BOSS 3
+#define TILE_CHEST 4
+#define TILE_STAIRS 5
 
 // 게임 상태 정의
 #define STATE_MAIN_MENU 0
@@ -49,6 +52,10 @@ typedef struct
 } Character;
 
 extern TTF_Font* g_font;
+
+//전투 메시지 출력 버퍼 지정
+extern char g_msg1[128];
+extern char g_msg2[128];
 
 #endif
 
