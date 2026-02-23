@@ -35,11 +35,9 @@ typedef struct
     int atk;
     int is_defending;
 
-    /* 논리적 맵 좌표 */
     int x;
     int y;
 
-    /* 스무스 무브먼트용 픽셀 좌표 */
     int pixel_x;
     int pixel_y;
     int is_moving;
@@ -51,8 +49,6 @@ typedef struct
 } Character;
 
 extern TTF_Font* g_font;
-extern SDL_Texture* g_p_img;
-extern SDL_Texture* g_e_img;
 
 #endif
 
