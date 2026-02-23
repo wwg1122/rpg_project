@@ -37,9 +37,6 @@ int saved_map_y = 0;
 char g_msg1[128] = "";
 char g_msg2[128] = "";
 
-/* -------------------------------------------------------------------------- */
-/* 시각 연출을 위한 헬퍼 함수 선언 영역                                       */
-/* -------------------------------------------------------------------------- */
 
 // 전투씬 배경 유지 렌더러 (애니메이션 재생 시 배경 깜빡임 방지용)
 void render_battle_scene(SDL_Renderer* renderer, Character* player, Enemy* current_monster, int difficulty, int is_boss, int menu_index, int hide_monster)
@@ -59,7 +56,16 @@ void render_battle_scene(SDL_Renderer* renderer, Character* player, Enemy* curre
 		else { msx = 144; msy = 0; } 
 
 		SDL_Rect m_src = { msx, msy, 16, 16 };
-		SDL_Rect m_dst = { 275, 120, 250, 250 };
+		SDL_Rect m_dst;
+		if (is_boss) 
+        	{
+            		m_dst.x = 225; m_dst.y = 70; m_dst.w = 350; m_dst.h = 350;
+        	}
+        	else 
+        	{
+            		m_dst.x = 275; m_dst.y = 120; m_dst.w = 250; m_dst.h = 250;
+        	}
+
 		SDL_RenderCopy(renderer, char_tex, &m_src, &m_dst);
 
 		char m_hp_str[32];
@@ -67,7 +73,7 @@ void render_battle_scene(SDL_Renderer* renderer, Character* player, Enemy* curre
 		render_text(renderer, m_hp_str, 340, 380, 255, 100, 100);
 	}
 
-	draw_dw_window(renderer, 20, 20, 200, 260);
+	draw_dw_window(renderer, 20, 20, 230, 260);
 	render_text(renderer, "COMMAND", 50, 40, 255, 255, 255);
 	for (int i = 0; i < 5; i++)
 	{
@@ -200,9 +206,6 @@ void play_stair_effect(SDL_Renderer* renderer)
 	SDL_Delay(200); 
 }
 
-/* -------------------------------------------------------------------------- */
-/* 메인 함수 영역                                                             */
-/* -------------------------------------------------------------------------- */
 
 int main(int argc, char *argv[])
 {	
@@ -282,7 +285,7 @@ int main(int argc, char *argv[])
 	SDL_Event e;
 
 	//사용자 정의 데이터(캐릭터)
-	Character warrior = {150, 150, 30, 30, 20, 0, 0, 0};	//체력,최대체력,마나,최대마나,공격력
+	Character warrior = {150, 150, 30, 30, 300, 0, 0, 0};	//체력,최대체력,마나,최대마나,공격력
 	Character mage = {80, 80, 120, 120, 10, 0, 0, 0};
 	Character player;				//실제 플레이어 데이터 설정
 
@@ -443,8 +446,8 @@ int main(int argc, char *argv[])
 									mp_potions++;
 									sprintf(msg, "FOUND MP POTION!");
 								}
-								draw_dw_window(renderer, 200, 250, 400, 100);
-								render_text(renderer, msg, 250, 290, 255, 255, 0);
+								draw_dw_window(renderer, 205, 250, 405, 100);
+								render_text(renderer, msg, 220, 290, 255, 255, 0);
 								SDL_RenderPresent(renderer);
 								SDL_Delay(1000);
 							}
@@ -909,7 +912,7 @@ int main(int argc, char *argv[])
 							else if (t == TILE_CHEST)
 							{
 								// 보물상자 타일 렌더링 적용 (계단 타일 인접 좌표 사용)
-								SDL_Rect chest_s = { 16, 112, ts, ts };
+								SDL_Rect chest_s = { 64, 64, ts, ts };
 								SDL_RenderCopy(renderer, map_tex, &chest_s, &d_r);
 							}
 							else if (t == TILE_MONSTER || t == TILE_BOSS)
@@ -943,48 +946,8 @@ int main(int argc, char *argv[])
 		/* [5. 전투 화면 렌더링] */
 		else if (game_state == 3)
 		{
-			SET_COLOR(0, 0, 0);
-			SDL_Rect b_bg = {0, 0, 800, 600};
-			FILL_RECT(b_bg);
-
-			if (current_monster == NULL) { game_state = 99; continue; }
-
-			int msx = 0; int msy = 0;
-			if (is_boss) { msx = 96; msy = 64; }
-			else if (difficulty == 0) { msx = 0; msy = 64; }
-			else if (difficulty == 1) { msx = 48; msy = 64; } 
-			else { msx = 144; msy = 0; } 
-
-			SDL_Rect m_src = { msx, msy, 16, 16 };
-			SDL_Rect m_dst = { 275, 120, 250, 250 };
-			SDL_RenderCopy(renderer, char_tex, &m_src, &m_dst);
-
-			char m_hp_str[32];
-			sprintf(m_hp_str, "HP: %d/%d", current_monster->hp, current_monster->max_hp);
-			render_text(renderer, m_hp_str, 340, 380, 255, 100, 100);
-
-			draw_dw_window(renderer, 20, 20, 200, 260);
-			render_text(renderer, "COMMAND", 50, 40, 255, 255, 255);
-			for (int i = 0; i < 5; i++)
-			{
-				if (menu_index == i) render_text(renderer, ">", 35, 90 + (i * 35), 255, 255, 0);
-				render_text(renderer, battle_menu[i], 60, 90 + (i * 35), (menu_index == i ? 255 : 255), (menu_index == i ? 255 : 255), (menu_index == i ? 0 : 255));
-			}
-
-			draw_dw_window(renderer, 550, 20, 220, 200);
-			render_text(renderer, "STATUS", 600, 40, 255, 255, 255);
-
-			char stat_p[32];
-			sprintf(stat_p, "HP: %d", player.hp); 
-			render_text(renderer, stat_p, 580, 90, 255, 255, 255);
+			render_battle_scene(renderer, &player, current_monster, difficulty, is_boss, menu_index, 0);
 			
-			sprintf(stat_p, "MP: %d", player.mp); 
-			render_text(renderer, stat_p, 580, 130, 255, 255, 255);
-			
-			sprintf(stat_p, "ATK: %d", player.atk); 
-			render_text(renderer, stat_p, 580, 170, 255, 255, 255);
-
-			// 터미널 출력을 배제하고, 글로벌 메시지 변수를 이용해 메시지 박스 렌더링
 			draw_dw_window(renderer, 100, 420, 600, 140);
 			if (g_msg1[0] != '\0') render_text(renderer, g_msg1, 130, 460, 255, 255, 255);
 			if (g_msg2[0] != '\0') render_text(renderer, g_msg2, 130, 500, 255, 255, 255);
@@ -1001,31 +964,31 @@ int main(int argc, char *argv[])
 			else if (game_state == 5) SET_COLOR(20, 80, 40);
 			else SET_COLOR(60, 40, 20);
 
-			SDL_Rect popup = {250, 200, 300, 200};
+			SDL_Rect popup = {230, 200, 350, 200};
 			FILL_RECT(popup);
 
 			if (game_state == 4)
 			{
-				render_text(renderer, "--- SKILL ---", 285, 210, 255, 255, 255);
+				render_text(renderer, "--- SKILL ---", 255, 210, 255, 255, 255);
 				for (int i = 0; i < 2; i++)
 				{
-					SDL_Rect opt = {300, 260 + (i * 60), 200, 40};
+					SDL_Rect opt = {260, 260 + (i * 60), 300, 40};
 					if (menu_index == i) SET_COLOR(255, 255, 0);
 					else SET_COLOR(150, 150, 150);
 					FILL_RECT(opt);
-					render_text(renderer, current_skills[i], 310, 270 + (i * 60), 0, 0, 0);
+					render_text(renderer, current_skills[i], 265, 270 + (i * 60), 0, 0, 0);
 				}
 			}
 			else if (game_state == 5)
 			{
-				render_text(renderer, "--- ITEM ---", 290, 210, 255, 255, 255);
+				render_text(renderer, "--- ITEM ---", 255, 210, 255, 255, 255);
 				for (int i = 0; i < 2; i++)
 				{
-					SDL_Rect opt = {300, 260 + (i * 60), 200, 40};
+					SDL_Rect opt = {260, 260 + (i * 60), 280, 40};
 					if (menu_index == i) SET_COLOR(255, 255, 0);
 					else SET_COLOR(150, 150, 150);
 					FILL_RECT(opt);
-					render_text(renderer, item_menu[i], 310, 270 + (i * 60), 0, 0, 0);
+					render_text(renderer, item_menu[i], 265, 270 + (i * 60), 0, 0, 0);
 				}
 			}
 			else if (game_state == 6)
@@ -1049,7 +1012,7 @@ int main(int argc, char *argv[])
 			else SET_COLOR(0, 50, 100);
 			FILL_RECT(full_bg);
 
-			draw_dw_window(renderer, 150, 200, 500, 200);
+			draw_dw_window(renderer, 155, 200, 505, 200);
 
 			/* 중앙 대칭 맞춤형 좌표 설정 완료 */
 			if (player.hp <= 0)
@@ -1058,11 +1021,11 @@ int main(int argc, char *argv[])
 			}
 			else
 			{
-				render_text(renderer, "YOU WIN!", 350, 230, 50, 255, 50);
-				render_text(renderer, diff_names[difficulty], 300, 280, 255, 255, 255);
-				render_text(renderer, "STAGE CLEARED!", 310, 320, 255, 255, 0);
+				render_text(renderer, "YOU WIN!", 300, 230, 50, 255, 50);
+				render_text(renderer, diff_names[difficulty], 255, 280, 255, 255, 255);
+				render_text(renderer, "STAGE CLEARED!", 245, 320, 255, 255, 0);
 			}
-			render_text(renderer, "PRESS ENTER TO RETURN", 260, 450, 255, 255, 255);
+			render_text(renderer, "PRESS ENTER TO RETURN", 170, 465, 255, 255, 255);
 		}
 
 		draw_scanlines(renderer, 800, 600);
