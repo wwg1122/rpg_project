@@ -8,6 +8,7 @@ typedef struct
 {
     char name[20];
     int hp, max_hp, atk;
+    int mp;
     int x, y;
     int min_x, max_x; // 몬스터 활동 구역 (방 경계)
     int min_y, max_y;
