@@ -16,14 +16,11 @@ void connect_points(int x1, int y1, int x2, int y2)
     int cx = x1;
     int cy = y1;
 
-    // 가로 이동
     while (cx != x2)
     {
-        // 벽일 때만 길(TILE_PATH)로 변경하여 기존 방/보스방 타일 보호
         if (g_dungeon_map[cy][cx] == TILE_WALL) g_dungeon_map[cy][cx] = TILE_PATH;
         cx += (x1 < x2) ? 1 : -1;
     }
-    // 세로 이동
     while (cy != y2)
     {
         if (g_dungeon_map[cy][cx] == TILE_WALL) g_dungeon_map[cy][cx] = TILE_PATH;
@@ -33,7 +30,6 @@ void connect_points(int x1, int y1, int x2, int y2)
 
 void init_map(int difficulty, int current_floor, int max_floor, Character *player)
 {
-    // 1. 맵 전체 초기화
     for (int y = 0; y < MAP_HEIGHT; y++)
         for (int x = 0; x < MAP_WIDTH; x++)
             g_dungeon_map[y][x] = TILE_WALL;
@@ -42,11 +38,9 @@ void init_map(int difficulty, int current_floor, int max_floor, Character *playe
     Room rooms[12];
     int actual_rooms = 0;
 
-    // 2. 방 생성 루프
     for (int i = 0; i < room_limit; i++)
     {
         Room r;
-        // 마지막 방은 보스방으로 설정
         if (current_floor == max_floor && i == room_limit - 1)
         { r.w = BOSS_ROOM_W; r.h = BOSS_ROOM_H; }
         else
@@ -59,7 +53,6 @@ void init_map(int difficulty, int current_floor, int max_floor, Character *playe
             r.x = GET_RAND(2, MAP_WIDTH - r.w - 2);
             r.y = GET_RAND(2, MAP_HEIGHT - r.h - 2);
 
-            // ROOM_MARGIN을 적용해 방 사이 거리를 강제함
             for (int j = 0; j < actual_rooms; j++)
             {
                 if (!(r.x + r.w + ROOM_MARGIN < rooms[j].x || r.x > rooms[j].x + rooms[j].w + ROOM_MARGIN ||
@@ -71,14 +64,12 @@ void init_map(int difficulty, int current_floor, int max_floor, Character *playe
 
         if (is_overlap) continue;
 
-        // 방 바닥 생성
         for (int py = r.y; py < r.y + r.h; py++)
             for (int px = r.x; px < r.x + r.w; px++)
                 g_dungeon_map[py][px] = TILE_PATH;
 
         rooms[actual_rooms] = r;
 
-        // [핵심] 이전 방과 현재 방을 일대일로만 연결 (방-길-방 구조)
         if (actual_rooms > 0)
         {
             connect_points(rooms[actual_rooms - 1].x + rooms[actual_rooms - 1].w / 2,
@@ -88,14 +79,11 @@ void init_map(int difficulty, int current_floor, int max_floor, Character *playe
         actual_rooms++;
     }
 
-    // 3. 플레이어 및 보스/계단 배치
     if (actual_rooms > 0)
     {
-        // 시작 위치: 첫 번째 방
         player->x = rooms[0].x + rooms[0].w / 2;
         player->y = rooms[0].y + rooms[0].h / 2;
 
-        // [ADD] 상점방 희소성 부여 (1층 확정, 이후 30% 확률)
         int shop_idx = -1;
         if (actual_rooms > 2 && (current_floor == 1 || GET_RAND(1, 100) <= 30))
         {
@@ -107,7 +95,6 @@ void init_map(int difficulty, int current_floor, int max_floor, Character *playe
             g_dungeon_map[sy][sx + 1] = TILE_TORCH;
         }
 
-        // 탈출구/보스 위치: 마지막 방
         Room last = rooms[actual_rooms - 1];
         int tx = last.x + last.w / 2;
         int ty = last.y + last.h / 2;
@@ -115,9 +102,7 @@ void init_map(int difficulty, int current_floor, int max_floor, Character *playe
 
         for (int i = 1; i < actual_rooms - 1; i++)
         {
-            // 상점방에는 상자 미생성
             if (i == shop_idx) continue;
-
             if (GET_RAND(1, 100) <= 40)
             {
                 int cx = GET_RAND(rooms[i].x + 1, rooms[i].x + rooms[i].w - 2);
@@ -125,7 +110,6 @@ void init_map(int difficulty, int current_floor, int max_floor, Character *playe
                 if (g_dungeon_map[cy][cx] == TILE_PATH) g_dungeon_map[cy][cx] = TILE_CHEST;
             }
         }
-        // 몬스터 생성 (상점방 제외를 위해 shop_idx 전달)
         spawn_monsters_in_rooms(rooms, actual_rooms, difficulty, (current_floor == max_floor), current_floor, shop_idx);
     }
 }

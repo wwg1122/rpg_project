@@ -10,7 +10,7 @@ typedef struct
     int hp, max_hp, atk;
     int mp;
     int x, y;
-    int min_x, max_x; // 몬스터 활동 구역 (방 경계)
+    int min_x, max_x; 
     int min_y, max_y;
     int is_alive;
     int ignore_turns;

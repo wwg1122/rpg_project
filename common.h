@@ -19,11 +19,10 @@
 #define TILE_BOSS 3
 #define TILE_CHEST 4
 #define TILE_STAIRS 5
-// [ADD] 상점 및 포탈 타일 추가
 #define TILE_NPC 6
 #define TILE_TORCH 7
 #define TILE_PORTAL 8
-#define TILE_BOSS_CHEST 9 // [ADD] 보스 전용 장비 상자 타일
+#define TILE_BOSS_CHEST 9 // 보스 전용 장비 상자 타일
 
 // 게임 상태 정의
 #define STATE_MAIN_MENU 0
@@ -32,8 +31,6 @@
 #define STATE_MAP 99      // 던전 탐험
 #define STATE_BATTLE 3    // 전투
 #define STATE_GAME_OVER 7 // 결과
-
-// [ADD] 시스템 상태 정의
 #define STATE_LOAD_MENU 10
 #define STATE_SAVE_MENU 11
 #define STATE_ESC_MENU 12
@@ -42,13 +39,17 @@
 #define STATE_INVEN_MENU 15
 #define STATE_SHOP_UI 16
 
-typedef struct ItemNode
-{
+// [ADD] 무기 등급 정의
+#define RARITY_COMMON 0 // 60% (흰색)
+#define RARITY_RARE 1   // 30% (파랑)
+#define RARITY_EPIC 2   // 10% (보라)
+
+// [ADD] 무기 구조체
+typedef struct {
     char name[32];
-    int type; 
-    int stat_bonus;
-    struct ItemNode* next;
-} ItemNode;
+    int atk_bonus;
+    int rarity;
+} WeaponItem;
 
 typedef struct
 {
@@ -56,17 +57,15 @@ typedef struct
     int max_hp;
     int mp;
     int max_mp;
-    int atk;
+    int atk; // 순수 기본 공격력
     int is_defending;
 
     int x;
     int y;
-
     int pixel_x;
     int pixel_y;
     int is_moving;
 
-    /* 애니메이션 및 방향 */
     int dir;
     int anim_frame;
     int anim_timer;
@@ -76,13 +75,11 @@ typedef struct
     int exp;
     int gold;
     
-    // [ADD] 장비 데이터
-    int equip_weapon_atk;
-    int equip_armor_def;
-    char weapon_name[32];
-    char armor_name[32];
+    // [ADD] 무기 인벤토리 및 장착 시스템
+    WeaponItem weapons[20];
+    int weapon_count;
+    int equipped_weapon_idx; // -1이면 미장착
     
-    ItemNode* inventory; 
 } Character;
 
 typedef struct
@@ -96,8 +93,6 @@ typedef struct
 } SaveSlot;
 
 extern TTF_Font* g_font;
-
-//전투 메시지 출력 버퍼 지정
 extern char g_msg1[128];
 extern char g_msg2[128];
 
