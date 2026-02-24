@@ -5,12 +5,15 @@ Enemy g_monsters[MAX_MONSTERS];
 int g_monster_count = 0;
 
 /* [1단계] 몬스터 데이터 밸런싱 적용 */
-void spawn_monsters_in_rooms(Room* rooms, int room_count, int difficulty, int is_boss_floor, int current_floor)
+void spawn_monsters_in_rooms(Room* rooms, int room_count, int difficulty, int is_boss_floor, int current_floor, int shop_idx)
 {
     g_monster_count = 0;
 
     for (int i = 1; i < room_count; i++)
     {
+        // [ADD] 상점방 몬스터 스폰 금지
+        if (i == shop_idx) continue;
+
         /* 마지막 방에 보스 배치 */
         if (is_boss_floor && i == room_count - 1)
         {
@@ -30,6 +33,9 @@ void spawn_monsters_in_rooms(Room* rooms, int room_count, int difficulty, int is
             
             boss->is_alive = 1;
             boss->ignore_turns = 0;
+            boss->exp_reward = 100 + (current_floor * 50); 
+            boss->gold_reward = 200 + (current_floor * 100);
+
             g_dungeon_map[boss->y][boss->x] = TILE_BOSS;
             continue;
         }
@@ -45,18 +51,24 @@ void spawn_monsters_in_rooms(Room* rooms, int room_count, int difficulty, int is
                 sprintf(e->name, "Slime");
                 e->max_hp = 30 + (current_floor * 5);
                 e->atk = 5 + (current_floor * 1);
+                e->exp_reward = 15 + (current_floor * 5); 
+                e->gold_reward = 10 + (current_floor * 2); 
             }
             else if (difficulty == 1) 
             {
                 sprintf(e->name, "Bat"); /* 2단계 박쥐로 명칭 통일 */
                 e->max_hp = 50 + (current_floor * 10);
                 e->atk = 10 + (current_floor * 2);
+                e->exp_reward = 30 + (current_floor * 7); 
+                e->gold_reward = 25 + (current_floor * 5); 
             }
             else 
             {
                 sprintf(e->name, "Skeleton"); /* 3단계 해골로 명칭 통일 */
                 e->max_hp = 80 + (current_floor * 15);
                 e->atk = 15 + (current_floor * 3);
+                e->exp_reward = 50 + (current_floor * 10); 
+                e->gold_reward = 40 + (current_floor * 8);
             }
             e->hp = e->max_hp;
 

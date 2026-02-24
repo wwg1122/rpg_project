@@ -19,6 +19,11 @@
 #define TILE_BOSS 3
 #define TILE_CHEST 4
 #define TILE_STAIRS 5
+// [ADD] 상점 및 포탈 타일 추가
+#define TILE_NPC 6
+#define TILE_TORCH 7
+#define TILE_PORTAL 8
+#define TILE_BOSS_CHEST 9 // [ADD] 보스 전용 장비 상자 타일
 
 // 게임 상태 정의
 #define STATE_MAIN_MENU 0
@@ -28,6 +33,22 @@
 #define STATE_BATTLE 3    // 전투
 #define STATE_GAME_OVER 7 // 결과
 
+// [ADD] 시스템 상태 정의
+#define STATE_LOAD_MENU 10
+#define STATE_SAVE_MENU 11
+#define STATE_ESC_MENU 12
+#define STATE_STATUS_MENU 13
+#define STATE_EQUIP_MENU 14
+#define STATE_INVEN_MENU 15
+#define STATE_SHOP_UI 16
+
+typedef struct ItemNode
+{
+    char name[32];
+    int type; 
+    int stat_bonus;
+    struct ItemNode* next;
+} ItemNode;
 
 typedef struct
 {
@@ -49,7 +70,30 @@ typedef struct
     int dir;
     int anim_frame;
     int anim_timer;
+
+    int class_type; 
+    int level;
+    int exp;
+    int gold;
+    
+    // [ADD] 장비 데이터
+    int equip_weapon_atk;
+    int equip_armor_def;
+    char weapon_name[32];
+    char armor_name[32];
+    
+    ItemNode* inventory; 
 } Character;
+
+typedef struct
+{
+    int is_empty;
+    Character player_data;
+    int hp_potions;
+    int mp_potions;
+    int difficulty;
+    int current_floor;
+} SaveSlot;
 
 extern TTF_Font* g_font;
 
@@ -58,4 +102,3 @@ extern char g_msg1[128];
 extern char g_msg2[128];
 
 #endif
-
