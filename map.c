@@ -145,6 +145,7 @@ void init_map(int difficulty, int current_floor, int max_floor, Character *playe
 				}
 
 				if (path_count == 4 || path_count == 6)
+				
 				{
 					if (GET_RAND(1, 100) <= 10) 
 					{
